@@ -53,12 +53,10 @@ class AiExplanationService(private val apiKey: String) {
 
         val trimmedKey = apiKey.trim()
 
-        // Google Gemini keys (both modern "AQ." and legacy "AIzaSy" formats)
         if (trimmedKey.startsWith("AQ.") || trimmedKey.startsWith("AIzaSy")) {
             return@withContext callGeminiApi(trimmedKey, scannedText, detectedBrandHint, userConditions, userProfile)
         }
 
-        // Groq, Cerebras, xAI OpenAI-compatible fallback
         return@withContext callOpenAiCompatibleApi(trimmedKey, scannedText, detectedBrandHint, userConditions, userProfile)
     }
 
@@ -69,53 +67,62 @@ class AiExplanationService(private val apiKey: String) {
         userConditions: List<String>,
         userProfile: UserProfile? = null
     ): DynamicAiResult {
-        val conditionsText = if (userConditions.isNotEmpty()) {
-            userConditions.joinToString(", ")
-        } else {
-            "None specified (general public health evaluation)"
-        }
+        val conditionsText = userConditions.joinToString(", ").ifBlank { "None declared (general public health evaluation)" }
+        val fitnessGoal = userProfile?.fitnessGoal?.ifBlank { "Maintain & Clean Eating" } ?: "Maintain & Clean Eating"
+        val userWeightKg = userProfile?.weightKg?.let { "$it kg" } ?: "Not provided"
+        val userHeightCm = userProfile?.heightCm?.let { "$it cm" } ?: "Not provided"
+        val userAge = userProfile?.age?.let { "$it years" } ?: "Not provided"
+
         val prompt = """
-    You are an authoritative clinical food forensic auditor and sports nutritionist specializing in FSSAI and Indian packaged foods.
+    You are an authoritative clinical food forensic auditor, molecular biochemist, and sports nutritionist specializing in FSSAI regulations, WHO dietary guidelines, and Indian packaged foods.
     
-    OBJECTIVE:
-    Extract or calculate complete nutritional facts and deliver a customized evaluation tailored to the user's clinical conditions, biometrics, and body composition goals.
-    
-    DATA CONTEXT:
-    Scanned OCR Text:
+    PRIMARY OBJECTIVE:
+    Forensically audit the scanned product label against the user's specific health directives, chronic conditions, and metabolic targets. Reconstruct missing or obscured macro/micronutrient profiles using verified product intelligence.
+
+    USER CLINICAL PROFILE & BIOMETRICS:
+    - Declared Conditions & Directives: [$conditionsText]
+    - Target Fitness Goal: $fitnessGoal
+    - Age: $userAge
+    - Body Weight: $userWeightKg
+    - Height: $userHeightCm
+
+    SCANNED OCR TEXT:
     \"\"\"
     $scannedText
     \"\"\"
-    Verified Brand/Product Hint: ${detectedBrandHint ?: "Indian packaged snack/food"}
-    
-    USER PROFILE & ATHLETIC TARGETS:
-    - Clinical Conditions & Allergens: [$conditionsText]
-    - Fitness Goal: ${userProfile?.fitnessGoal?.ifBlank { "Maintain & Clean Eating" } ?: "Maintain & Clean Eating"}
-    - Age: ${userProfile?.age?.let { "$it years" } ?: "Not specified"}
-    - Weight: ${userProfile?.weightKg?.let { "$it kg" } ?: "Not specified"}
-    - Height: ${userProfile?.heightCm?.let { "$it cm" } ?: "Not specified"}
+    Verified Brand / Product Context Hint: ${detectedBrandHint ?: "Indian packaged snack/beverage/staple"}
 
-    CRITICAL NUTRITION EXTRACTION RULES:
-    1. Extract exact per 100g numbers from the scan if visible.
-    2. If an essential metric (Energy, Carbs, Added Sugars, Total Fat, Saturated Fat, Trans Fat, Protein, Sodium) is partly cropped or obscured by OCR, USE YOUR VERIFIED DATABASE KNOWLEDGE of this exact Indian product/category to provide accurate standard values per 100g.
-    3. DO NOT output "Not Declared" unless genuinely inapplicable. Always output standard values with units (e.g., "520 kcal", "68g", "22g", "120mg").
-    4. Assign status ("Low", "Moderate", "High") following WHO guidelines.
-    5. Decode all INS/E-numbers into plain English functional roles.
+    CLINICAL AUDIT DIRECTIVES & PATHOLOGY PROTOCOLS:
+    1. PATHOLOGY CONTRAINDICATIONS:
+       - If user lists Cancer or Oncology Directives: Scrutinize for synthetic food dyes (INS 102 Tartrazine, INS 110 Sunset Yellow, INS 129 Allura Red), artificial sweeteners (Aspartame INS 951, Acesulfame K INS 950, Sucralose INS 955), BHA (INS 320), BHT (INS 321), high fructose corn syrup, and oxidized high-heat seed oils.
+       - If user lists Celiac / Gluten Sensitivity: Flag wheat, maida, barley, malt extract, semolina (sooji), rye, and ambiguous "modified food starch" or "stabilizers (INS 1422, 1442)" without explicit gluten-free declaration.
+       - If user lists Guillain-Barré Syndrome (GBS) / Autoimmune / Neuropathy: Flag neurotoxic excitotoxins (Monosodium Glutamate INS 621, Disodium Guanylate INS 627, Inosinate INS 631), artificial sweeteners, and systemic inflammatory refined seed oils.
+       - If user lists Diabetes / Pre-Diabetes / Insulin Resistance: Scrutinize glycemic load, maltodextrin (Glycemic Index 110-185), inverted sugar syrup, liquid glucose, and total carbohydrate-to-fiber ratio.
+       - If user lists Hypertension / Renal Impairment / Kidney Disease: Strictly audit sodium (mg per 100g and per serving) and potassium additives (e.g., Potassium Chloride INS 508).
+       - If user lists Fatty Liver / High Cholesterol / Cardiac Risk: Audit palm oil, palmolein, interesterified vegetable fats, hydrogenated oils, trans fatty acids, and saturated fat percentages.
 
-    FITNESS GOAL & BIOMETRIC SCORING ADJUSTMENTS:
-    - If the user's goal is 'Weight Gain / Muscle Building': Reward high-protein density and clean complex calories. Moderately tolerate caloric density, but penalize empty sugars, trans fats, and palm oil.
-    - If the user's goal is 'Weight Loss / Fat Cut': Heavily penalize high caloric density, refined carbohydrates, high sugar-to-protein ratios, and saturated fats. Reward high fiber and high satiety index.
-    - If 'Athletic Performance': Prioritize electrolyte balance (sodium/potassium), glycogen replenishment quality, and minimal inflammatory additives.
-    - Incorporate their specific fitness goal directly into `aiExplanation` and `scoreAuditReason`.
+    2. METABOLIC GOAL & ATHLETIC CALIBRATION:
+       - Weight Gain / Muscle Building: Reward protein density (P:E ratio) and bioavailable calories. Tolerate complex fats/carbs, but heavily penalize empty sugars and trans fats.
+       - Weight Loss / Fat Cut: Heavily penalize caloric density, refined carbohydrates (Maida), hidden liquid sugars, and saturated fat. Reward high dietary fiber (>6g/100g) and protein satiety.
+       - Maintain & Clean Eating / Athletic Performance: Heavily penalize hyper-palatable industrial additives, artificial emulsifiers (INS 471, 472), and sodium imbalance. Reward clean electrolyte profiles and whole-food matrices.
 
-    Output MUST be valid JSON matching this schema:
+    3. NUTRITION EXTRACTION & DATA RECONSTRUCTION RULES:
+       - Extract exact per 100g metrics from OCR.
+       - If an essential metric (Energy, Carbs, Added Sugars, Total Fat, Saturated Fat, Trans Fat, Protein, Sodium) is cropped, distorted, or missing from OCR, USE YOUR VERIFIED DATABASE KNOWLEDGE of this exact Indian product/category to provide accurate standard values per 100g.
+       - DO NOT output "Not Declared" or "N/A" unless fundamentally non-applicable. Always supply units (e.g., "520 kcal", "68g", "22g", "120mg").
+       - Assign status ("Low", "Moderate", "High") following WHO nutrient profiling guidelines.
+       - Decode all INS / E-numbers into plain English with their functional biological mechanism.
+
+    OUTPUT FORMAT:
+    You MUST output valid, parseable JSON matching this EXACT structure with no preamble, no markdown formatting outside of JSON, and no code ticks:
     {
       "productName": "<Exact brand and product name>",
       "score": 45,
       "verdict": "<Nutritious Choice | Moderate / Occasional Choice | Ultra-Processed / Consume Sparingly>",
       "summary": "<Objective 2-sentence clinical assessment>",
-      "aiExplanation": "<2-3 sentence personalized verdict addressing the user's clinical profile, weight, and fitness goal>",
-      "scoreAuditReason": "<1-sentence breakdown of why this score was calculated considering their fitness goal and ingredient processing>",
-      "scannedMacroSummary": "<e.g. 74% Refined Maida + Palm Oil>",
+      "aiExplanation": "<2-3 sentence personalized verdict addressing the user's specific clinical conditions, weight, and fitness goal>",
+      "scoreAuditReason": "<1-sentence breakdown explaining the score calculation against their fitness goal and ingredient processing level>",
+      "scannedMacroSummary": "<e.g., 68% Refined Wheat Flour + 24% Palm Oil>",
       "nutritionTable": [
         {"nutrientName": "Energy", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
         {"nutrientName": "Carbohydrates", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
@@ -141,15 +148,15 @@ class AiExplanationService(private val apiKey: String) {
       ],
       "containsPalmOil": false,
       "palmOilDetails": "<Factual oil note or null>",
-      "healthBenefits": ["<Evidence-based health benefit>"],
+      "healthBenefits": ["<Evidence-based health benefit or null if ultra-processed>"],
       "warnings": [
-        {"condition": "Nutrient Note", "message": "<Clinical observation>"}
+        {"condition": "Nutrient Directive", "message": "<Clinical observation>"}
       ],
       "personalizedWarnings": [
         {
-          "condition": "<Condition Name or Fitness Goal>",
+          "condition": "<Specific Condition or Fitness Goal>",
           "severity": "<CRITICAL|MODERATE|SAFE>",
-          "reason": "<Specific reason why this product affects their health condition or fitness goal>"
+          "reason": "<Specific biological mechanism why this product impacts their pathology or goal>"
         }
       ],
       "dynamicAlternatives": [
@@ -158,15 +165,12 @@ class AiExplanationService(private val apiKey: String) {
           "scoreOutOf100": 85,
           "whyBetterThanScanned": "<Direct comparative nutritional advantage aligned with their fitness target>",
           "cleanSearchQuery": "<Precise search query for Blinkit/Zepto/Instamart>",
-          "alternativeSummary": "<e.g. 25g Whey Protein • Zero Palm Oil>",
+          "alternativeSummary": "<e.g., 18g Protein • Zero Palm Oil • High Fiber>",
           "reason": "<Reason for recommendation>"
         }
       ]
     }
 """.trimIndent()
-
-
-        // Modern Gemini 2.0 / 2.5 flash models
 
         var lastError: Exception? = null
         val candidateModels = listOf(
@@ -188,13 +192,13 @@ class AiExplanationService(private val apiKey: String) {
                     })
                     put("generationConfig", JSONObject().apply {
                         put("responseMimeType", "application/json")
-                        put("temperature", 0.2)
+                        put("temperature", 0.1)
                     })
                 }
 
                 val request = Request.Builder()
                     .url("https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$key")
-                    .addHeader("x-goog-api-key", key) // Required for AQ. authentication keys
+                    .addHeader("x-goog-api-key", key)
                     .addHeader("Content-Type", "application/json")
                     .post(payload.toString().toRequestBody("application/json".toMediaType()))
                     .build()
@@ -245,12 +249,37 @@ class AiExplanationService(private val apiKey: String) {
             else -> "llama-3.3-70b-versatile"
         }
 
-        val conditionsText = if (userConditions.isNotEmpty()) userConditions.joinToString(", ") else "None"
-        val prompt = "Extract nutritional facts and evaluate for: $conditionsText. Scanned text:\n$scannedText"
+        val conditionsText = userConditions.joinToString(", ").ifBlank { "None declared" }
+        val fitnessGoal = userProfile?.fitnessGoal?.ifBlank { "Maintain & Clean Eating" } ?: "Maintain & Clean Eating"
+        val userWeightKg = userProfile?.weightKg?.let { "$it kg" } ?: "Not provided"
+
+        val prompt = """
+            You are an authoritative clinical food forensic auditor and sports nutritionist specializing in FSSAI and packaged foods.
+            
+            OBJECTIVE:
+            Evaluate the scanned product against the user's specific health directives and biometrics.
+            
+            USER CLINICAL PROFILE:
+            - Declared Conditions & Directives: [$conditionsText]
+            - Target Fitness Goal: $fitnessGoal
+            - Body Weight: $userWeightKg
+
+            CLINICAL AUDIT DIRECTIVE:
+            1. If the user lists custom, serious conditions (such as Cancer, GBS, Celiac, or Renal Impairment), you MUST search ingredients for carcinogens, inflammatory seed oils, artificial sweeteners (e.g., Aspartame, Sucralose), high sodium, or specific contraindications related to those conditions.
+            2. Explicitly explain the impact in `aiExplanation` and output corresponding directives in `personalizedWarnings`.
+            
+            SCANNED OCR TEXT:
+            \"\"\"
+            $scannedText
+            \"\"\"
+            Product Hint: ${detectedBrandHint ?: "Indian packaged food"}
+
+            Respond strictly in valid JSON matching the schema with fields: productName, score, verdict, summary, aiExplanation, scoreAuditReason, scannedMacroSummary, nutritionTable, scoreFactors, fullIngredientsList, simplifiedIngredients, healthBenefits, warnings, containsPalmOil, palmOilDetails, personalizedWarnings, dynamicAlternatives.
+        """.trimIndent()
 
         val requestJson = JSONObject().apply {
             put("model", model)
-            put("temperature", 0.0)
+            put("temperature", 0.1)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "user")

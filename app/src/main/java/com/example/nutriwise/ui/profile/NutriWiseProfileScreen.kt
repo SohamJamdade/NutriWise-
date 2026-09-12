@@ -1,6 +1,7 @@
 package com.example.nutriwise.ui.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +35,7 @@ import com.example.nutriwise.domain.UserProfile
 import com.example.nutriwise.ui.auth.AuthViewModel
 import com.example.nutriwise.ui.feed.FeedViewModel
 import com.example.nutriwise.ui.feed.PostImageView
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -47,11 +49,29 @@ fun NutriWiseProfileScreen(
     onToggleTheme: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val coroutineScope = rememberCoroutineScope()
     val userProfile by authViewModel.userProfile.collectAsState()
     var showEditDialog by remember { mutableStateOf(false) }
     var postToDelete by remember { mutableStateOf<ReviewPost?>(null) }
 
     val profile = userProfile ?: UserProfile()
+
+    // Health directives state
+    var customConditionInput by remember { mutableStateOf("") }
+    var selectedConditions by remember(profile.healthConditions) {
+        mutableStateOf(profile.healthConditions.toSet())
+    }
+
+    val defaultConditions = listOf(
+        "Type 2 Diabetes", "Pre-Diabetes", "Hypertension (High BP)",
+        "High Cholesterol", "Fatty Liver", "PCOS / PCOD",
+        "Kidney Disease", "GERD / Acid Reflux", "Gluten Sensitivity"
+    )
+    val allConditions = remember(selectedConditions) {
+        (defaultConditions + selectedConditions).distinct()
+    }
+
+    var isSavingDirectives by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -178,12 +198,13 @@ fun NutriWiseProfileScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             TextButton(onClick = { showEditDialog = true }) {
-                                Text("Update")
+                                Text("Edit All")
                             }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        // Stats Summary Row
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -191,24 +212,24 @@ fun NutriWiseProfileScreen(
                             ProfileStatBox(
                                 label = "Goal",
                                 value = profile.fitnessGoal.ifBlank { "Clean Eating" },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1.1f)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             ProfileStatBox(
                                 label = "Age",
-                                value = profile.age?.let { "$it yrs" } ?: "N/A",
+                                value = profile.age?.let { "$it yrs" } ?: "--",
                                 modifier = Modifier.weight(0.7f)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             ProfileStatBox(
                                 label = "Weight",
-                                value = profile.weightKg?.let { "$it kg" } ?: "N/A",
+                                value = profile.weightKg?.let { "$it kg" } ?: "--",
                                 modifier = Modifier.weight(0.8f)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             ProfileStatBox(
                                 label = "Height",
-                                value = profile.heightCm?.let { "$it cm" } ?: "N/A",
+                                value = profile.heightCm?.let { "$it cm" } ?: "--",
                                 modifier = Modifier.weight(0.8f)
                             )
                         }
@@ -216,7 +237,7 @@ fun NutriWiseProfileScreen(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Text(
-                            text = "Health Conditions & Preferences:",
+                            text = "Active Health Directives:",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -224,29 +245,98 @@ fun NutriWiseProfileScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        if (profile.healthConditions.isEmpty()) {
-                            Text(
-                                text = "No health conditions selected.",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        // Custom Directive Input Field
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = customConditionInput,
+                                onValueChange = { customConditionInput = it },
+                                placeholder = { Text("Add custom condition (e.g. Celiac)", fontSize = 12.sp) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f)
                             )
-                        } else {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    val trimmed = customConditionInput.trim()
+                                    if (trimmed.isNotBlank()) {
+                                        selectedConditions = selectedConditions + trimmed
+                                        customConditionInput = ""
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
                             ) {
-                                profile.healthConditions.forEach { condition ->
-                                    AssistChip(
-                                        onClick = {},
-                                        label = { Text(condition, fontSize = 12.sp) },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Default.HealthAndSafety,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp)
-                                            )
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Condition",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Conditions Chip Cloud
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            allConditions.forEach { condition ->
+                                val isSelected = selectedConditions.contains(condition)
+                                val isCustom = !defaultConditions.contains(condition)
+
+                                RemovableSelectableChip(
+                                    text = condition,
+                                    isSelected = isSelected,
+                                    canDelete = isCustom || isSelected,
+                                    onToggle = {
+                                        selectedConditions = if (isSelected) {
+                                            selectedConditions - condition
+                                        } else {
+                                            selectedConditions + condition
                                         }
+                                    },
+                                    onDelete = {
+                                        selectedConditions = selectedConditions - condition
+                                    }
+                                )
+                            }
+                        }
+
+                        // Save Condition Changes Button (if modified)
+                        if (selectedConditions != profile.healthConditions.toSet()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    isSavingDirectives = true
+                                    coroutineScope.launch {
+                                        try {
+                                            val updated = profile.copy(
+                                                healthConditions = selectedConditions.toList()
+                                            )
+                                            authViewModel.saveProfileUpdates(updated)
+                                        } finally {
+                                            isSavingDirectives = false
+                                        }
+                                    }
+                                },
+                                enabled = !isSavingDirectives,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                if (isSavingDirectives) {
+                                    CircularProgressIndicator(
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(18.dp)
                                     )
+                                } else {
+                                    Text("Save Directive Changes")
                                 }
                             }
                         }
@@ -319,7 +409,7 @@ fun NutriWiseProfileScreen(
         }
     }
 
-    // Dialog for Editing Profile
+    // Dialog for Editing Full Profile
     if (showEditDialog) {
         EditProfileDialog(
             currentProfile = profile,
@@ -354,6 +444,42 @@ fun NutriWiseProfileScreen(
             }
         )
     }
+}
+
+@Composable
+fun RemovableSelectableChip(
+    text: String,
+    isSelected: Boolean,
+    canDelete: Boolean,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
+    FilterChip(
+        selected = isSelected,
+        onClick = onToggle,
+        label = { Text(text, fontSize = 12.sp) },
+        leadingIcon = if (isSelected) {
+            {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Selected",
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        } else null,
+        trailingIcon = if (canDelete) {
+            {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Remove Condition",
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable { onDelete() }
+                )
+            }
+        } else null,
+        shape = RoundedCornerShape(8.dp)
+    )
 }
 
 @Composable
@@ -501,13 +627,16 @@ private fun EditProfileDialog(
     onDismiss: () -> Unit,
     onSave: (UserProfile) -> Unit
 ) {
-    var username by remember { mutableStateOf(currentProfile.username) }
-    var ageText by remember { mutableStateOf(currentProfile.age?.toString() ?: "") }
-    var heightText by remember { mutableStateOf(currentProfile.heightCm?.toString() ?: "") }
-    var weightText by remember { mutableStateOf(currentProfile.weightKg?.toString() ?: "") }
-    var selectedGoal by remember { mutableStateOf(currentProfile.fitnessGoal.ifBlank { "Maintain Weight" }) }
+    val coroutineScope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
 
-    val allConditions = listOf(
+    var displayName by remember { mutableStateOf(currentProfile.username) }
+    var editAge by remember { mutableStateOf(currentProfile.age?.toString() ?: "") }
+    var editHeight by remember { mutableStateOf(currentProfile.heightCm?.toString() ?: "") }
+    var editWeight by remember { mutableStateOf(currentProfile.weightKg?.toString() ?: "") }
+    var editGoal by remember { mutableStateOf(currentProfile.fitnessGoal.ifBlank { "Maintain & Clean Eating" }) }
+
+    val defaultOptions = listOf(
         "Type 2 Diabetes", "Hypertension (High BP)", "High Cholesterol",
         "Fatty Liver", "PCOS / PCOD", "GERD / Acid Reflux", "GBS"
     )
@@ -524,9 +653,9 @@ private fun EditProfileDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Username") },
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("Display Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -536,24 +665,24 @@ private fun EditProfileDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedTextField(
-                        value = ageText,
-                        onValueChange = { ageText = it.filter { char -> char.isDigit() } },
+                        value = editAge,
+                        onValueChange = { editAge = it.filter { char -> char.isDigit() } },
                         label = { Text("Age") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
-                        value = weightText,
-                        onValueChange = { weightText = it },
+                        value = editWeight,
+                        onValueChange = { editWeight = it },
                         label = { Text("Weight (kg)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
-                        value = heightText,
-                        onValueChange = { heightText = it },
+                        value = editHeight,
+                        onValueChange = { editHeight = it },
                         label = { Text("Height (cm)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
@@ -562,26 +691,31 @@ private fun EditProfileDialog(
                 }
 
                 Text("Fitness Goal:", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                val goals = listOf("Weight Loss", "Muscle Gain", "Maintain Weight", "Clean Eating")
+                val goals = listOf(
+                    "Weight Loss / Fat Cut",
+                    "Weight Gain / Muscle Building",
+                    "Maintain & Clean Eating",
+                    "Athletic Performance"
+                )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     goals.forEach { goal ->
                         FilterChip(
-                            selected = selectedGoal == goal,
-                            onClick = { selectedGoal = goal },
+                            selected = editGoal == goal,
+                            onClick = { editGoal = goal },
                             label = { Text(goal, fontSize = 12.sp) }
                         )
                     }
                 }
 
-                Text("Health Conditions:", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("Health Directives:", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    allConditions.forEach { condition ->
+                    (defaultOptions + selectedConditions).distinct().forEach { condition ->
                         FilterChip(
                             selected = selectedConditions.contains(condition),
                             onClick = {
@@ -600,22 +734,38 @@ private fun EditProfileDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val updated = currentProfile.copy(
-                        username = username.trim(),
-                        age = ageText.toIntOrNull(),
-                        weightKg = weightText.toDoubleOrNull(),
-                        heightCm = heightText.toDoubleOrNull(),
-                        fitnessGoal = selectedGoal,
-                        healthConditions = selectedConditions.toList()
-                    )
-                    onSave(updated)
-                }
+                    isSaving = true
+                    coroutineScope.launch {
+                        try {
+                            val updated = currentProfile.copy(
+                                username = displayName.trim(),
+                                age = editAge.toIntOrNull(),
+                                heightCm = editHeight.toDoubleOrNull(),
+                                weightKg = editWeight.toDoubleOrNull(),
+                                fitnessGoal = editGoal,
+                                healthConditions = selectedConditions.toList(),
+                                isOnboardingCompleted = true
+                            )
+                            onSave(updated)
+                        } finally {
+                            isSaving = false
+                        }
+                    }
+                },
+                enabled = !isSaving
             ) {
-                Text("Save")
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                } else {
+                    Text("Save")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
                 Text("Cancel")
             }
         }

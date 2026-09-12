@@ -1,6 +1,5 @@
 package com.example.nutriwise.ui.auth
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,7 +8,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material3.*
@@ -17,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -45,12 +45,19 @@ fun HealthOnboardingScreen(
         "Athletic Performance"
     )
     var selectedGoal by remember { mutableStateOf(currentProfile.fitnessGoal.ifBlank { goals[2] }) }
+
+    // Dynamic Condition States
+    var customConditionInput by remember { mutableStateOf("") }
     var selectedConditions by remember { mutableStateOf(currentProfile.healthConditions.toSet()) }
 
-    val conditionOptions = listOf(
+    val staticConditions = listOf(
         "Type 2 Diabetes", "Hypertension (High BP)", "High Cholesterol",
         "Fatty Liver", "PCOS / PCOD", "GERD / Acid Reflux", "GBS"
     )
+
+    val displayedConditions = remember(selectedConditions) {
+        (staticConditions + selectedConditions).distinct()
+    }
 
     var isSubmitting by remember { mutableStateOf(false) }
 
@@ -90,7 +97,10 @@ fun HealthOnboardingScreen(
                 elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.MonitorWeight,
@@ -225,7 +235,7 @@ fun HealthOnboardingScreen(
             }
 
             // ---------------------------------------------------------
-            // 3. CLINICAL CONDITIONS
+            // 3. CLINICAL CONDITIONS (Static & Custom)
             // ---------------------------------------------------------
             ElevatedCard(
                 shape = RoundedCornerShape(18.dp),
@@ -240,21 +250,74 @@ fun HealthOnboardingScreen(
                         fontSize = 15.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
+                    // Custom Condition Input Bar
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = customConditionInput,
+                            onValueChange = { customConditionInput = it },
+                            placeholder = { Text("Add custom condition (e.g. Celiac)", fontSize = 13.sp) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            textStyle = TextStyle(color = inputTextColor, fontSize = 14.sp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                val trimmed = customConditionInput.trim()
+                                if (trimmed.isNotBlank()) {
+                                    selectedConditions = selectedConditions + trimmed
+                                    customConditionInput = ""
+                                }
+                            },
+                            modifier = Modifier
+                                .size(50.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add Condition",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Chips Layout
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        conditionOptions.forEach { cond ->
+                        displayedConditions.forEach { cond ->
                             val isSelected = selectedConditions.contains(cond)
+                            val isCustom = !staticConditions.contains(cond)
+
                             FilterChip(
                                 selected = isSelected,
                                 onClick = {
                                     selectedConditions = if (isSelected) selectedConditions - cond else selectedConditions + cond
                                 },
-                                label = { Text(cond, fontSize = 12.sp) }
+                                label = { Text(cond, fontSize = 12.sp) },
+                                trailingIcon = if (isCustom) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove Condition",
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clickable {
+                                                    selectedConditions = selectedConditions - cond
+                                                }
+                                        )
+                                    }
+                                } else null
                             )
                         }
                     }
@@ -287,7 +350,10 @@ fun HealthOnboardingScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 if (isSubmitting) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
                 } else {
                     Text(
                         text = "Save & Go to Dashboard",

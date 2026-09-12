@@ -32,36 +32,36 @@ class ScannerViewModel : ViewModel() {
     private val imageService = DynamicProductImageService()
     private val firebaseRepo = FirebaseRepository()
 
-
-    private val aiService = AiExplanationService(apiKey = "Gemini_API_KEY ")
+    private val aiService = AiExplanationService(apiKey = "GEMINI_API_KEY")
 
     private val _uiState = MutableStateFlow<ScanUiState>(ScanUiState.Idle)
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
 
-    fun processCapturedImage(bitmap: Bitmap) {
+    fun processCapturedImage(bitmap: Bitmap, profile: UserProfile? = null) {
         _uiState.value = ScanUiState.Processing
 
         viewModelScope.launch {
             try {
-                // 1. Fetch user profile & dietary conditions
-                val userProfile = firebaseRepo.fetchCurrentUserProfile() ?: UserProfile()
-                val userConditions = userProfile.healthConditions
+                // 1. Resolve user profile (use passed instance or fallback to Firebase)
+                val targetProfile = profile ?: firebaseRepo.fetchCurrentUserProfile() ?: UserProfile()
 
                 // 2. OCR & Barcode extraction
                 val detection = dualScanner.analyzeImage(bitmap)
 
                 if (detection.ingredientsText.isBlank() && detection.verifiedProductName == null) {
-                    _uiState.value = ScanUiState.Error("No readable barcode or ingredient label found. Please hold the camera steady.")
+                    _uiState.value = ScanUiState.Error(
+                        "No readable barcode or ingredient label found. Please hold the camera steady."
+                    )
                     return@launch
                 }
 
-                // 3. Dynamic Forensic Extraction via xAI Grok
+                // 3. Dynamic forensic analysis using user metrics & conditions
                 val hint = detection.verifiedProductName?.let { "$it by ${detection.verifiedBrand ?: ""}" }
                 val dynamicResult = aiService.analyzeLabelDynamically(
                     scannedText = detection.ingredientsText,
                     detectedBrandHint = hint,
-                    userConditions = userConditions,
-                    userProfile = userProfile
+                    userConditions = targetProfile.healthConditions,
+                    userProfile = targetProfile
                 )
 
                 // 4. Fetch cleaner alternative images concurrently
@@ -102,7 +102,9 @@ class ScannerViewModel : ViewModel() {
 
             } catch (e: Exception) {
                 e.printStackTrace()
-                _uiState.value = ScanUiState.Error("Analysis failed: ${e.localizedMessage ?: "Please try again."}")
+                _uiState.value = ScanUiState.Error(
+                    "Analysis failed: ${e.localizedMessage ?: "Please try again."}"
+                )
             }
         }
     }

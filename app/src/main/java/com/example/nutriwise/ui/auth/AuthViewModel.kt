@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import com.example.nutriwise.ui.auth.AuthViewModel
 
 sealed interface AuthUiState {
     object Idle : AuthUiState
@@ -92,7 +91,8 @@ class AuthViewModel : ViewModel() {
                     if (hasHighCholesterol) add("High Cholesterol")
                     addAll(allergens)
                     addAll(otherConditions)
-                }
+                },
+                isOnboardingCompleted = false
             )
             val result = repository.signUp(email, pass, username, profile)
             if (result.isSuccess) {

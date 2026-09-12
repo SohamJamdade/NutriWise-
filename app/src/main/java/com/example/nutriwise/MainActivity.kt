@@ -39,7 +39,7 @@ import com.example.nutriwise.ui.ScannerViewModel
 import com.example.nutriwise.ui.auth.AuthScreen
 import com.example.nutriwise.ui.auth.AuthUiState
 import com.example.nutriwise.ui.auth.AuthViewModel
-import com.example.nutriwise.ui.auth.HealthOnboardingScreen // your updated onboarding screen composable
+import com.example.nutriwise.ui.auth.HealthOnboardingScreen
 import com.example.nutriwise.ui.feed.CommunityFeedScreen
 import com.example.nutriwise.ui.feed.FeedViewModel
 import com.example.nutriwise.ui.profile.NutriWiseProfileScreen
@@ -54,20 +54,32 @@ class MainActivity : ComponentActivity() {
             var isDarkMode by rememberSaveable { mutableStateOf(systemDark) }
             val context = LocalContext.current
 
-            // Local SharedPreferences cache for persistent one-time onboarding
             val prefs = remember { context.getSharedPreferences("nutriwise_prefs", Context.MODE_PRIVATE) }
-            var isOnboardingDone by remember {
-                mutableStateOf(prefs.getBoolean("is_onboarding_completed", false))
-            }
 
             NutriWiseTheme(darkTheme = isDarkMode) {
                 val authViewModel: AuthViewModel = viewModel()
                 val authState by authViewModel.uiState.collectAsState()
                 val userProfile by authViewModel.userProfile.collectAsState()
+                val currentUser = authViewModel.currentUser
+
+                // User-scoped onboarding key so a new account doesn't inherit an old user's completion status
+                val userOnboardingKey = remember(currentUser?.uid) {
+                    "is_onboarding_completed_${currentUser?.uid ?: "none"}"
+                }
+                var isOnboardingDone by remember(currentUser?.uid) {
+                    mutableStateOf(prefs.getBoolean(userOnboardingKey, false))
+                }
+
+                // Automatically load user profile whenever an account signs in
+                LaunchedEffect(currentUser?.uid) {
+                    if (currentUser != null && userProfile == null) {
+                        authViewModel.loadUserProfile()
+                    }
+                }
 
                 when {
                     // 1. Not Authenticated -> Show Login / Register
-                    authState !is AuthUiState.Authenticated || authViewModel.currentUser == null -> {
+                    authState !is AuthUiState.Authenticated || currentUser == null -> {
                         AuthScreen(
                             viewModel = authViewModel,
                             onAuthSuccess = { authViewModel.loadUserProfile() }
@@ -84,13 +96,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 3. First-time user (Local flag is false AND Firebase profile says not completed)
-                    !isOnboardingDone && (userProfile?.isOnboardingCompleted != true) -> {
+                    // 3. User has NOT completed onboarding (checked both locally and against Firebase)
+                    !isOnboardingDone && userProfile?.isOnboardingCompleted != true -> {
                         HealthOnboardingScreen(
                             currentProfile = userProfile ?: UserProfile(),
                             onCompleteOnboarding = { updatedProfile ->
-                                // Mark locally so it never appears again even if offline or app reopens
-                                prefs.edit().putBoolean("is_onboarding_completed", true).apply()
+                                // Save completion specifically for this UID
+                                prefs.edit().putBoolean(userOnboardingKey, true).apply()
                                 isOnboardingDone = true
                                 authViewModel.saveProfileUpdates(updatedProfile)
                             }
@@ -121,6 +133,7 @@ fun MainAppScaffold(
     val scannerViewModel: ScannerViewModel = viewModel()
     val feedViewModel: FeedViewModel = viewModel()
 
+    val userProfile by authViewModel.userProfile.collectAsState()
     val scanState by scannerViewModel.uiState.collectAsState()
     val myPosts by feedViewModel.myPostsState.collectAsState()
 
@@ -242,7 +255,7 @@ fun MainAppScaffold(
                         }
                         else -> {
                             CameraScannerView(
-                                onImageCaptured = { bitmap -> scannerViewModel.processCapturedImage(bitmap) }
+                                onImageCaptured = { bitmap -> scannerViewModel.processCapturedImage(bitmap, userProfile) }
                             )
                         }
                     }
