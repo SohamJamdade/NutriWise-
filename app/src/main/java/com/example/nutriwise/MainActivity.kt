@@ -1,5 +1,6 @@
 package com.example.nutriwise
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,17 +16,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.DynamicFeed
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.nutriwise.domain.UserProfile
 import com.example.nutriwise.ui.AnalysisResultScreen
 import com.example.nutriwise.ui.CameraScannerView
 import com.example.nutriwise.ui.ScanUiState
@@ -33,10 +39,10 @@ import com.example.nutriwise.ui.ScannerViewModel
 import com.example.nutriwise.ui.auth.AuthScreen
 import com.example.nutriwise.ui.auth.AuthUiState
 import com.example.nutriwise.ui.auth.AuthViewModel
+import com.example.nutriwise.ui.auth.HealthOnboardingScreen // your updated onboarding screen composable
 import com.example.nutriwise.ui.feed.CommunityFeedScreen
 import com.example.nutriwise.ui.feed.FeedViewModel
 import com.example.nutriwise.ui.profile.NutriWiseProfileScreen
-import com.example.nutriwise.ui.auth.HealthSurveyScreen
 import com.example.nutriwise.ui.theme.NutriWiseTheme
 
 class MainActivity : ComponentActivity() {
@@ -46,6 +52,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             val systemDark = isSystemInDarkTheme()
             var isDarkMode by rememberSaveable { mutableStateOf(systemDark) }
+            val context = LocalContext.current
+
+            // Local SharedPreferences cache for persistent one-time onboarding
+            val prefs = remember { context.getSharedPreferences("nutriwise_prefs", Context.MODE_PRIVATE) }
+            var isOnboardingDone by remember {
+                mutableStateOf(prefs.getBoolean("is_onboarding_completed", false))
+            }
 
             NutriWiseTheme(darkTheme = isDarkMode) {
                 val authViewModel: AuthViewModel = viewModel()
@@ -53,13 +66,15 @@ class MainActivity : ComponentActivity() {
                 val userProfile by authViewModel.userProfile.collectAsState()
 
                 when {
-                    authState !is AuthUiState.Authenticated -> {
+                    // 1. Not Authenticated -> Show Login / Register
+                    authState !is AuthUiState.Authenticated || authViewModel.currentUser == null -> {
                         AuthScreen(
                             viewModel = authViewModel,
                             onAuthSuccess = { authViewModel.loadUserProfile() }
                         )
                     }
-// 2. Waiting for profile data from Firebase -> Show Loading Spinner
+
+                    // 2. Authenticated but waiting for profile data from Firebase -> Show Spinner
                     userProfile == null -> {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -69,17 +84,20 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 3. Authenticated but Has Not Completed Survey -> Show Survey ONE TIME
-                    !userProfile!!.isSurveyCompleted -> {
-                        HealthSurveyScreen(
-                            currentProfile = userProfile!!,
-                            onSurveyComplete = { conditions ->
-                                authViewModel.completeSurvey(conditions)
+                    // 3. First-time user (Local flag is false AND Firebase profile says not completed)
+                    !isOnboardingDone && (userProfile?.isOnboardingCompleted != true) -> {
+                        HealthOnboardingScreen(
+                            currentProfile = userProfile ?: UserProfile(),
+                            onCompleteOnboarding = { updatedProfile ->
+                                // Mark locally so it never appears again even if offline or app reopens
+                                prefs.edit().putBoolean("is_onboarding_completed", true).apply()
+                                isOnboardingDone = true
+                                authViewModel.saveProfileUpdates(updatedProfile)
                             }
                         )
                     }
 
-                    // 4. Survey Completed -> Proceed to Main Application
+                    // 4. Fully Onboarded -> Main Dashboard
                     else -> {
                         MainAppScaffold(
                             authViewModel = authViewModel,

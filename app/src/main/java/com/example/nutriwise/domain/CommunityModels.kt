@@ -2,7 +2,7 @@ package com.example.nutriwise.domain
 
 import com.google.firebase.database.IgnoreExtraProperties
 
-
+@IgnoreExtraProperties
 data class UserProfile(
     val uid: String = "",
     val username: String = "",
@@ -15,7 +15,12 @@ data class UserProfile(
     val allergenAvoidList: List<String> = emptyList(),
     val otherConditions: List<String> = emptyList(),
     val healthConditions: List<String> = emptyList(),
-    val isSurveyCompleted: Boolean = false
+    val isSurveyCompleted: Boolean = false,
+    val age: Int? = null,
+    val heightCm: Double? = null,
+    val weightKg: Double? = null,
+    val fitnessGoal: String = "Maintain Weight",
+    val isOnboardingCompleted: Boolean = false
 )
 
 @IgnoreExtraProperties

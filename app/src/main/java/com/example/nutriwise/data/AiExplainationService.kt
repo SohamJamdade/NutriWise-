@@ -6,6 +6,7 @@ import com.example.nutriwise.domain.HealthAlternative
 import com.example.nutriwise.domain.MacroComparison
 import com.example.nutriwise.domain.NutritionFact
 import com.example.nutriwise.domain.ScoreFactor
+import com.example.nutriwise.domain.UserProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,25 +47,27 @@ class AiExplanationService(private val apiKey: String) {
     suspend fun analyzeLabelDynamically(
         scannedText: String,
         detectedBrandHint: String? = null,
-        userConditions: List<String> = emptyList()
+        userConditions: List<String> = emptyList(),
+        userProfile: UserProfile? = null
     ): DynamicAiResult = withContext(Dispatchers.IO) {
 
         val trimmedKey = apiKey.trim()
 
         // Google Gemini keys (both modern "AQ." and legacy "AIzaSy" formats)
         if (trimmedKey.startsWith("AQ.") || trimmedKey.startsWith("AIzaSy")) {
-            return@withContext callGeminiApi(trimmedKey, scannedText, detectedBrandHint, userConditions)
+            return@withContext callGeminiApi(trimmedKey, scannedText, detectedBrandHint, userConditions, userProfile)
         }
 
         // Groq, Cerebras, xAI OpenAI-compatible fallback
-        return@withContext callOpenAiCompatibleApi(trimmedKey, scannedText, detectedBrandHint, userConditions)
+        return@withContext callOpenAiCompatibleApi(trimmedKey, scannedText, detectedBrandHint, userConditions, userProfile)
     }
 
     private fun callGeminiApi(
         key: String,
         scannedText: String,
         detectedBrandHint: String?,
-        userConditions: List<String>
+        userConditions: List<String>,
+        userProfile: UserProfile? = null
     ): DynamicAiResult {
         val conditionsText = if (userConditions.isNotEmpty()) {
             userConditions.joinToString(", ")
@@ -72,84 +75,96 @@ class AiExplanationService(private val apiKey: String) {
             "None specified (general public health evaluation)"
         }
         val prompt = """
-            You are an authoritative clinical food forensic auditor and regulatory specialist in FSSAI and Indian packaged foods.
-            
-            OBJECTIVE:
-            Extract or calculate complete nutritional facts and evaluate the scanned food item.
-            
-            DATA CONTEXT:
-            Scanned OCR Text:
-            \"\"\"
-            $scannedText
-            \"\"\"
-            Verified Brand/Product Hint: ${detectedBrandHint ?: "Indian packaged snack/food"}
-            User Specific Profile: [$conditionsText]
+    You are an authoritative clinical food forensic auditor and sports nutritionist specializing in FSSAI and Indian packaged foods.
+    
+    OBJECTIVE:
+    Extract or calculate complete nutritional facts and deliver a customized evaluation tailored to the user's clinical conditions, biometrics, and body composition goals.
+    
+    DATA CONTEXT:
+    Scanned OCR Text:
+    \"\"\"
+    $scannedText
+    \"\"\"
+    Verified Brand/Product Hint: ${detectedBrandHint ?: "Indian packaged snack/food"}
+    
+    USER PROFILE & ATHLETIC TARGETS:
+    - Clinical Conditions & Allergens: [$conditionsText]
+    - Fitness Goal: ${userProfile?.fitnessGoal?.ifBlank { "Maintain & Clean Eating" } ?: "Maintain & Clean Eating"}
+    - Age: ${userProfile?.age?.let { "$it years" } ?: "Not specified"}
+    - Weight: ${userProfile?.weightKg?.let { "$it kg" } ?: "Not specified"}
+    - Height: ${userProfile?.heightCm?.let { "$it cm" } ?: "Not specified"}
 
-            CRITICAL NUTRITION EXTRACTION RULES:
-            1. Extract exact per 100g numbers from the scan if visible.
-            2. If an essential metric (Energy, Carbs, Added Sugars, Total Fat, Saturated Fat, Trans Fat, Protein, Sodium) is partly cropped or obscured by OCR, USE YOUR VERIFIED DATABASE KNOWLEDGE of this exact Indian product/category to provide accurate standard values per 100g.
-            3. DO NOT output "Not Declared" unless the nutrient is genuinely inapplicable (e.g. Sodium in table sugar). Always provide realistic, standard values with proper units (e.g., "520 kcal", "68g", "22g", "120mg").
-            4. Assign an accurate status ("Low", "Moderate", "High") according to standard WHO guidelines.
-            5. Decode all INS/E-number additives into plain English functional explanations.
-            6. Suggest 2 real, cleaner packaged alternatives sold on Indian quick-commerce (Blinkit, Zepto, Swiggy Instamart).
+    CRITICAL NUTRITION EXTRACTION RULES:
+    1. Extract exact per 100g numbers from the scan if visible.
+    2. If an essential metric (Energy, Carbs, Added Sugars, Total Fat, Saturated Fat, Trans Fat, Protein, Sodium) is partly cropped or obscured by OCR, USE YOUR VERIFIED DATABASE KNOWLEDGE of this exact Indian product/category to provide accurate standard values per 100g.
+    3. DO NOT output "Not Declared" unless genuinely inapplicable. Always output standard values with units (e.g., "520 kcal", "68g", "22g", "120mg").
+    4. Assign status ("Low", "Moderate", "High") following WHO guidelines.
+    5. Decode all INS/E-numbers into plain English functional roles.
 
-            Output MUST be valid JSON matching this schema:
-            {
-              "productName": "<Exact brand and product name>",
-              "score": 45,
-              "verdict": "<Nutritious Choice | Moderate / Occasional Choice | Ultra-Processed / Consume Sparingly>",
-              "summary": "<Objective 2-sentence clinical assessment>",
-              "aiExplanation": "<2-3 sentence personalized verdict addressing user's declared profile>",
-              "scoreAuditReason": "<1-sentence breakdown of why this score was calculated>",
-              "scannedMacroSummary": "<e.g. 74% Refined Maida + Palm Oil>",
-              "nutritionTable": [
-                {"nutrientName": "Energy", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Carbohydrates", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Added Sugars", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Total Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Saturated Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Trans Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Protein", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
-                {"nutrientName": "Sodium", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"}
-              ],
-              "scoreFactors": [
-                {"factorName": "Processing Degree", "status": "High", "isFavorable": false},
-                {"factorName": "Added Sugars", "status": "Moderate", "isFavorable": false},
-                {"factorName": "Saturated Fat", "status": "High", "isFavorable": false},
-                {"factorName": "Sodium Load", "status": "Moderate", "isFavorable": true},
-                {"factorName": "Additive Load", "status": "High", "isFavorable": false}
-              ],
-              "fullIngredientsList": [
-                "<Individual ingredient names cleaned from OCR>"
-              ],
-              "simplifiedIngredients": [
-                "<INS Code and Name>: <Neutral functional explanation>"
-              ],
-              "containsPalmOil": false,
-              "palmOilDetails": "<Factual oil note or null>",
-              "healthBenefits": ["<Evidence-based health benefit>"],
-              "warnings": [
-                {"condition": "Nutrient Note", "message": "<Clinical observation>"}
-              ],
-              "personalizedWarnings": [
-                {
-                  "condition": "<User Condition Name>",
-                  "severity": "CRITICAL",
-                  "reason": "<Specific reason why this product affects the condition>"
-                }
-              ],
-              "dynamicAlternatives": [
-                {
-                  "name": "<Real cleaner Indian alternative brand and product>",
-                  "scoreOutOf100": 85,
-                  "whyBetterThanScanned": "<Direct comparative nutritional advantage>",
-                  "cleanSearchQuery": "<Precise search query for Blinkit/Zepto/Instamart>",
-                  "alternativeSummary": "<e.g. 100% Whole Wheat • Zero Palm Oil>",
-                  "reason": "<Reason for recommendation>"
-                }
-              ]
-            }
-        """.trimIndent()
+    FITNESS GOAL & BIOMETRIC SCORING ADJUSTMENTS:
+    - If the user's goal is 'Weight Gain / Muscle Building': Reward high-protein density and clean complex calories. Moderately tolerate caloric density, but penalize empty sugars, trans fats, and palm oil.
+    - If the user's goal is 'Weight Loss / Fat Cut': Heavily penalize high caloric density, refined carbohydrates, high sugar-to-protein ratios, and saturated fats. Reward high fiber and high satiety index.
+    - If 'Athletic Performance': Prioritize electrolyte balance (sodium/potassium), glycogen replenishment quality, and minimal inflammatory additives.
+    - Incorporate their specific fitness goal directly into `aiExplanation` and `scoreAuditReason`.
+
+    Output MUST be valid JSON matching this schema:
+    {
+      "productName": "<Exact brand and product name>",
+      "score": 45,
+      "verdict": "<Nutritious Choice | Moderate / Occasional Choice | Ultra-Processed / Consume Sparingly>",
+      "summary": "<Objective 2-sentence clinical assessment>",
+      "aiExplanation": "<2-3 sentence personalized verdict addressing the user's clinical profile, weight, and fitness goal>",
+      "scoreAuditReason": "<1-sentence breakdown of why this score was calculated considering their fitness goal and ingredient processing>",
+      "scannedMacroSummary": "<e.g. 74% Refined Maida + Palm Oil>",
+      "nutritionTable": [
+        {"nutrientName": "Energy", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Carbohydrates", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Added Sugars", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Total Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Saturated Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Trans Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Protein", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+        {"nutrientName": "Sodium", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"}
+      ],
+      "scoreFactors": [
+        {"factorName": "Processing Degree", "status": "High", "isFavorable": false},
+        {"factorName": "Goal Alignment", "status": "<Favorable|Unfavorable|Neutral>", "isFavorable": false},
+        {"factorName": "Added Sugars", "status": "Moderate", "isFavorable": false},
+        {"factorName": "Protein Efficiency", "status": "<Low|Moderate|High>", "isFavorable": true},
+        {"factorName": "Additive Load", "status": "High", "isFavorable": false}
+      ],
+      "fullIngredientsList": [
+        "<Individual ingredient names cleaned from OCR>"
+      ],
+      "simplifiedIngredients": [
+        "<INS Code and Name>: <Neutral functional explanation>"
+      ],
+      "containsPalmOil": false,
+      "palmOilDetails": "<Factual oil note or null>",
+      "healthBenefits": ["<Evidence-based health benefit>"],
+      "warnings": [
+        {"condition": "Nutrient Note", "message": "<Clinical observation>"}
+      ],
+      "personalizedWarnings": [
+        {
+          "condition": "<Condition Name or Fitness Goal>",
+          "severity": "<CRITICAL|MODERATE|SAFE>",
+          "reason": "<Specific reason why this product affects their health condition or fitness goal>"
+        }
+      ],
+      "dynamicAlternatives": [
+        {
+          "name": "<Real cleaner Indian alternative brand and product matching their goal>",
+          "scoreOutOf100": 85,
+          "whyBetterThanScanned": "<Direct comparative nutritional advantage aligned with their fitness target>",
+          "cleanSearchQuery": "<Precise search query for Blinkit/Zepto/Instamart>",
+          "alternativeSummary": "<e.g. 25g Whey Protein • Zero Palm Oil>",
+          "reason": "<Reason for recommendation>"
+        }
+      ]
+    }
+""".trimIndent()
+
 
         // Modern Gemini 2.0 / 2.5 flash models
 
@@ -213,7 +228,8 @@ class AiExplanationService(private val apiKey: String) {
         key: String,
         scannedText: String,
         detectedBrandHint: String?,
-        userConditions: List<String>
+        userConditions: List<String>,
+        userProfile: UserProfile? = null
     ): DynamicAiResult {
         val url = when {
             key.startsWith("gsk_") -> "https://api.groq.com/openai/v1/chat/completions"

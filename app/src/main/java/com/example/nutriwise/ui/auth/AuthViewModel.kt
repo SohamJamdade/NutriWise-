@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.example.nutriwise.ui.auth.AuthViewModel
 
 sealed interface AuthUiState {
     object Idle : AuthUiState
@@ -20,6 +21,9 @@ sealed interface AuthUiState {
 class AuthViewModel : ViewModel() {
 
     private val repository = FirebaseRepository()
+
+    val currentUser: com.google.firebase.auth.FirebaseUser?
+        get() = repository.currentUser
 
     private val _uiState = MutableStateFlow<AuthUiState>(
         if (repository.isUserLoggedIn) AuthUiState.Authenticated else AuthUiState.Idle
@@ -100,27 +104,31 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun saveProfileUpdates(updated: UserProfile) {
+    fun saveProfileUpdates(updatedProfile: UserProfile) {
         viewModelScope.launch {
-            repository.updateHealthProfile(updated)
-            _userProfile.value = updated
+            try {
+                val result = repository.saveUserProfile(updatedProfile)
+                if (result.isSuccess) {
+                    _userProfile.value = updatedProfile
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
-    // Handles survey completion and persists state to Firebase
     fun completeSurvey(conditions: List<String>) {
         viewModelScope.launch {
             val result = repository.completeHealthSurvey(conditions)
             if (result.isSuccess) {
                 _userProfile.value = _userProfile.value?.copy(
                     healthConditions = conditions,
-                    isSurveyCompleted = true
+                    isOnboardingCompleted = true
                 )
             }
         }
     }
 
-    // Dynamic condition updates from the Profile screen
     fun updateConditionsFromProfile(newConditions: List<String>) {
         viewModelScope.launch {
             val result = repository.updateUserHealthConditions(newConditions)

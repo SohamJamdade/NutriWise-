@@ -32,6 +32,9 @@ class FirebaseRepository {//
 
     private val storageRef = storage.reference.child("post_images")
 
+    val currentUser: com.google.firebase.auth.FirebaseUser?
+        get() = auth.currentUser
+
     val currentUserId: String?
         get() = auth.currentUser?.uid
 
@@ -400,6 +403,18 @@ class FirebaseRepository {//
                 "isSurveyCompleted" to true
             )
             usersRef.child(uid).updateChildren(updates).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Add this to data/FirebaseRepository.kt
+    suspend fun saveUserProfile(profile: UserProfile): Result<Unit> {
+        val uid = currentUserId ?: return Result.failure(IllegalStateException("Not logged in"))
+        val profileToSave = profile.copy(uid = uid)
+        return try {
+            usersRef.child(uid).setValue(profileToSave).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

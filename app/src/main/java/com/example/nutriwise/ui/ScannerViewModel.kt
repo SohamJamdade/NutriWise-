@@ -33,7 +33,7 @@ class ScannerViewModel : ViewModel() {
     private val firebaseRepo = FirebaseRepository()
 
 
-    private val aiService = AiExplanationService(apiKey = "GEMINI(3.6)_API_KEY")
+    private val aiService = AiExplanationService(apiKey = "Gemini_API_KEY ")
 
     private val _uiState = MutableStateFlow<ScanUiState>(ScanUiState.Idle)
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
@@ -60,7 +60,8 @@ class ScannerViewModel : ViewModel() {
                 val dynamicResult = aiService.analyzeLabelDynamically(
                     scannedText = detection.ingredientsText,
                     detectedBrandHint = hint,
-                    userConditions = userConditions
+                    userConditions = userConditions,
+                    userProfile = userProfile
                 )
 
                 // 4. Fetch cleaner alternative images concurrently
