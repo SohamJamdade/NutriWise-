@@ -177,7 +177,7 @@ fun CameraScannerView(
                         cameraExecutor,
                         object : ImageCapture.OnImageSavedCallback {
                             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                                val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+                                val bitmap = decodeAndCorrectExifOrientation(photoFile)
                                 if (bitmap != null) {
                                     ContextCompat.getMainExecutor(context).execute {
                                         onImageCaptured(bitmap)
@@ -203,5 +203,49 @@ fun CameraScannerView(
                 )
             }
         }
+    }
+}
+
+private fun decodeAndCorrectExifOrientation(file: File): Bitmap? {
+    val rawBitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return null
+    return try {
+        val exif = android.media.ExifInterface(file.absolutePath)
+        val orientation = exif.getAttributeInt(
+            android.media.ExifInterface.TAG_ORIENTATION,
+            android.media.ExifInterface.ORIENTATION_NORMAL
+        )
+        val rotationDegrees = when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+            else -> 0
+        }
+
+        val maxDim = 1920
+        val width = rawBitmap.width
+        val height = rawBitmap.height
+        val longest = maxOf(width, height)
+        val scale = if (longest > maxDim) maxDim.toFloat() / longest.toFloat() else 1.0f
+
+        val matrix = android.graphics.Matrix().apply {
+            if (scale != 1.0f) {
+                postScale(scale, scale)
+            }
+            if (rotationDegrees != 0) {
+                postRotate(rotationDegrees.toFloat())
+            }
+        }
+
+        if (rotationDegrees != 0 || scale != 1.0f) {
+            val processed = Bitmap.createBitmap(rawBitmap, 0, 0, width, height, matrix, true)
+            if (processed != rawBitmap) {
+                rawBitmap.recycle()
+            }
+            processed
+        } else {
+            rawBitmap
+        }
+    } catch (e: Exception) {
+        rawBitmap
     }
 }

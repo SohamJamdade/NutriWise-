@@ -1,9 +1,15 @@
 package com.example.nutriwise.domain
 
+import android.util.Log
 import com.example.nutriwise.data.ProductDto
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.generationConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import kotlin.math.roundToInt
 
-class NutritionAnalyser {
+class NutritionAnalyser(private val geminiApiKey: String? = null) {
 
     private val palmOilKeywords = listOf(
         "palm oil",
@@ -16,7 +22,10 @@ class NutritionAnalyser {
         "palmitic acid"
     )
 
-    fun analyze(product: ProductDto, userProfile: HealthProfile): ProductAssessment {
+    suspend fun analyze(
+        product: ProductDto,
+        userConditions: List<String>
+    ): Pair<ProductAssessment, List<DynamicHealthWarning>> {
         val nutriments = product.nutriments
         val insights = mutableListOf<NutrientInsight>()
         val personalizedNotes = mutableListOf<String>()
@@ -120,27 +129,22 @@ class NutritionAnalyser {
             null
         }
 
-        // 6. Allergen Checks
-        val allergensInProduct = (product.allergensTags ?: emptyList()).map { it.removePrefix("en:").lowercase() }
-        for (avoidAllergen in userProfile.allergenAvoidList) {
-            val normalizedAvoid = avoidAllergen.lowercase().trim()
-            if (allergensInProduct.any { it.contains(normalizedAvoid) } || ingredientsText.contains(normalizedAvoid)) {
-                allergenWarnings.add("Warning: Matches allergen preference ($avoidAllergen).")
+        // 6. Dynamic AI Reasoning against User Conditions
+        val dynamicWarnings = if (!geminiApiKey.isNullOrBlank() && userConditions.isNotEmpty()) {
+            val aiWarnings = thinkWithGemini(product, userConditions)
+            if (aiWarnings.isNotEmpty()) aiWarnings else fallbackDynamicAnalysis(product, userConditions, sugarLevel, sodiumLevel, satFatLevel, containsPalmOil)
+        } else {
+            fallbackDynamicAnalysis(product, userConditions, sugarLevel, sodiumLevel, satFatLevel, containsPalmOil)
+        }
+
+        dynamicWarnings.forEach { warning ->
+            personalizedNotes.add("${warning.condition}: ${warning.reason}")
+            if (warning.severity.equals("CRITICAL", ignoreCase = true)) {
+                allergenWarnings.add("Warning for ${warning.condition}: ${warning.reason}")
             }
         }
 
-        // 7. Personalization Notes
-        if (userProfile.hasDiabetes && sugarLevel == Level.HIGH) {
-            personalizedNotes.add("High sugar content (${sugars}g/100g). May lead to rapid glycemic spike.")
-        }
-        if (userProfile.hasHypertension && sodiumLevel == Level.HIGH) {
-            personalizedNotes.add("High sodium content (${(sodium * 1000).roundToInt()}mg/100g). Monitor daily intake.")
-        }
-        if (userProfile.isHighProteinGoal && protein >= 10.0) {
-            personalizedNotes.add("High protein content (${protein}g/100g) aligns with your daily protein goal.")
-        }
-
-        // 8. 100-Point Algorithmic Score
+        // 7. WHO Algorithmic Score
         var score = 90.0
         if (sugarLevel == Level.HIGH) score -= 22.0 else if (sugarLevel == Level.MODERATE) score -= 10.0
         if (sodiumLevel == Level.HIGH) score -= 18.0 else if (sodiumLevel == Level.MODERATE) score -= 8.0
@@ -151,7 +155,7 @@ class NutritionAnalyser {
 
         val finalScore = score.coerceIn(15.0, 95.0)
 
-        return ProductAssessment(
+        val assessment = ProductAssessment(
             overallScore = (finalScore * 10.0).roundToInt() / 10.0,
             nutrientInsights = insights,
             containsPalmOil = containsPalmOil,
@@ -159,5 +163,112 @@ class NutritionAnalyser {
             allergenWarnings = allergenWarnings,
             personalizedNotes = personalizedNotes
         )
+
+        return Pair(assessment, dynamicWarnings)
+    }
+
+    private suspend fun thinkWithGemini(
+        product: ProductDto,
+        userConditions: List<String>
+    ): List<DynamicHealthWarning> = withContext(Dispatchers.IO) {
+        try {
+            // Updated to active model with JSON schema enforcement
+            val model = GenerativeModel(
+                modelName = "gemini-3.6-flash",
+                apiKey = geminiApiKey!!,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    temperature = 0.0f
+                }
+            )
+
+            val prompt = """
+                You are NutriWise AI, a clinical nutritionist.
+                Analyze this food product against the user's custom health conditions:
+                Product: ${product.productName ?: "Unknown Product"}
+                Ingredients: ${product.ingredientsText ?: "Not specified"}
+                Sugars per 100g: ${product.nutriments?.sugars100g ?: 0.0}g
+                Sodium per 100g: ${product.nutriments?.sodium100g ?: 0.0}g
+                Saturated Fat per 100g: ${product.nutriments?.saturatedFat100g ?: 0.0}g
+                
+                User's Custom Conditions & Allergies:
+                ${userConditions.joinToString(", ")}
+                
+                Evaluate each user condition. Return ONLY a valid JSON array of objects without markdown:
+                [
+                  {
+                    "condition": "Name of condition",
+                    "severity": "CRITICAL",
+                    "reason": "Clear explanation of why this product affects them"
+                  }
+                ]
+            """.trimIndent()
+
+            val response = model.generateContent(prompt)
+            val jsonText = (response.text ?: "")
+                .replace("```json", "")
+                .replace("```", "")
+                .trim()
+
+            val warnings = mutableListOf<DynamicHealthWarning>()
+            val jsonArray = JSONArray(jsonText)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                warnings.add(
+                    DynamicHealthWarning(
+                        condition = obj.optString("condition"),
+                        severity = obj.optString("severity", "MODERATE"),
+                        reason = obj.optString("reason")
+                    )
+                )
+            }
+            warnings
+        } catch (e: Exception) {
+            Log.e("NutriWiseAI", "Gemini analysis error: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    private fun fallbackDynamicAnalysis(
+        product: ProductDto,
+        userConditions: List<String>,
+        sugarLevel: Level,
+        sodiumLevel: Level,
+        satFatLevel: Level,
+        containsPalmOil: Boolean
+    ): List<DynamicHealthWarning> {
+        val warnings = mutableListOf<DynamicHealthWarning>()
+        val ingredients = product.ingredientsText?.lowercase() ?: ""
+
+        userConditions.forEach { rawCondition ->
+            val cond = rawCondition.lowercase()
+            when {
+                cond.contains("diabet") || cond.contains("sugar") -> {
+                    if (sugarLevel == Level.HIGH) {
+                        warnings.add(DynamicHealthWarning(rawCondition, "CRITICAL", "High sugar load (${product.nutriments?.sugars100g}g/100g) risks spiking blood glucose."))
+                    } else if (sugarLevel == Level.MODERATE) {
+                        warnings.add(DynamicHealthWarning(rawCondition, "MODERATE", "Moderate sugar content. Consume in limited portions."))
+                    } else {
+                        warnings.add(DynamicHealthWarning(rawCondition, "SAFE", "Low sugar content; generally safer for glycemic balance."))
+                    }
+                }
+                cond.contains("hyper") || cond.contains("bp") || cond.contains("blood pressure") -> {
+                    if (sodiumLevel == Level.HIGH) {
+                        warnings.add(DynamicHealthWarning(rawCondition, "CRITICAL", "High sodium content exceeds recommended levels for blood pressure management."))
+                    }
+                }
+                cond.contains("cholesterol") || cond.contains("heart") -> {
+                    if (satFatLevel == Level.HIGH || containsPalmOil) {
+                        warnings.add(DynamicHealthWarning(rawCondition, "CRITICAL", "High saturated fat / palm oil content can elevate LDL cholesterol."))
+                    }
+                }
+                else -> {
+                    if (ingredients.contains(cond)) {
+                        warnings.add(DynamicHealthWarning(rawCondition, "CRITICAL", "Direct match detected in ingredient statement ($rawCondition)."))
+                    }
+                }
+            }
+        }
+        return warnings
     }
 }

@@ -7,7 +7,6 @@ import com.example.nutriwise.data.AiExplanationService
 import com.example.nutriwise.data.DualScannerEngine
 import com.example.nutriwise.data.DynamicProductImageService
 import com.example.nutriwise.data.FirebaseRepository
-import com.example.nutriwise.domain.ConditionWarning
 import com.example.nutriwise.domain.FullProductAnalysis
 import com.example.nutriwise.domain.UserProfile
 import kotlinx.coroutines.async
@@ -33,8 +32,8 @@ class ScannerViewModel : ViewModel() {
     private val imageService = DynamicProductImageService()
     private val firebaseRepo = FirebaseRepository()
 
-    // Consider moving this API key to BuildConfig / local.properties for security
-    private val aiService = AiExplanationService(apiKey = "YOUR_GROQ_API_KEY")
+
+    private val aiService = AiExplanationService(apiKey = "GEMINI_API_KEY (3.6)")
 
     private val _uiState = MutableStateFlow<ScanUiState>(ScanUiState.Idle)
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
@@ -44,10 +43,11 @@ class ScannerViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                // 1. Fetch user clinical profile
+                // 1. Fetch user profile & dietary conditions
                 val userProfile = firebaseRepo.fetchCurrentUserProfile() ?: UserProfile()
+                val userConditions = userProfile.healthConditions
 
-                // 2. Concurrent OCR & Barcode extraction
+                // 2. OCR & Barcode extraction
                 val detection = dualScanner.analyzeImage(bitmap)
 
                 if (detection.ingredientsText.isBlank() && detection.verifiedProductName == null) {
@@ -55,11 +55,15 @@ class ScannerViewModel : ViewModel() {
                     return@launch
                 }
 
-                // 3. AI Dynamic Analysis
+                // 3. Dynamic Forensic Extraction via xAI Grok
                 val hint = detection.verifiedProductName?.let { "$it by ${detection.verifiedBrand ?: ""}" }
-                val dynamicResult = aiService.analyzeLabelDynamically(detection.ingredientsText, hint)
+                val dynamicResult = aiService.analyzeLabelDynamically(
+                    scannedText = detection.ingredientsText,
+                    detectedBrandHint = hint,
+                    userConditions = userConditions
+                )
 
-                // 4. Fetch clean packshot images concurrently for dynamic swaps
+                // 4. Fetch cleaner alternative images concurrently
                 val enrichedAlternatives = dynamicResult.dynamicAlternatives.map { alt ->
                     async {
                         val fetchedImg = imageService.fetchRealProductImage(alt.cleanSearchQuery)
@@ -67,76 +71,9 @@ class ScannerViewModel : ViewModel() {
                     }
                 }.awaitAll()
 
-                // 5. Generate Personalized Medical Alerts
-                val personalizedWarnings = mutableListOf<ConditionWarning>()
-
-                // Profile Condition 1: Diabetes
-                if (userProfile.hasDiabetes) {
-                    val sugarFact = dynamicResult.nutritionTable.find {
-                        it.nutrientName.contains("Sugar", ignoreCase = true)
-                    }
-                    val isHighSugar = sugarFact?.status?.equals("High", ignoreCase = true) == true ||
-                            detection.ingredientsText.contains("sugar", ignoreCase = true) ||
-                            detection.ingredientsText.contains("invert syrup", ignoreCase = true)
-
-                    if (isHighSugar) {
-                        personalizedWarnings.add(
-                            ConditionWarning(
-                                condition = "🚨 Diabetes Profile Alert",
-                                message = "High glycemic / added sugar load detected. May trigger a rapid blood glucose spike."
-                            )
-                        )
-                    }
-                }
-
-                // Profile Condition 2: Hypertension (High BP)
-                if (userProfile.hasHypertension) {
-                    val sodiumFact = dynamicResult.nutritionTable.find {
-                        it.nutrientName.contains("Sodium", ignoreCase = true)
-                    }
-                    val isHighSodium = sodiumFact?.status?.equals("High", ignoreCase = true) == true ||
-                            detection.ingredientsText.contains("salt", ignoreCase = true) ||
-                            detection.ingredientsText.contains("sodium", ignoreCase = true)
-
-                    if (isHighSodium) {
-                        personalizedWarnings.add(
-                            ConditionWarning(
-                                condition = "🚨 Hypertension Alert",
-                                message = "Elevated sodium detected. Exceeds recommended single-serving threshold for blood pressure control."
-                            )
-                        )
-                    }
-                }
-
-                // Profile Condition 3: High Cholesterol / Palm Oil
-                if (userProfile.hasHighCholesterol && dynamicResult.containsPalmOil) {
-                    personalizedWarnings.add(
-                        ConditionWarning(
-                            condition = "🚨 Heart Health Alert",
-                            message = "Contains industrial palm/palmolein fractions rich in saturated palmitic acid."
-                        )
-                    )
-                }
-
-                // Profile Condition 4: User Allergen Flags
-                for (allergen in userProfile.allergenAvoidList) {
-                    if (detection.ingredientsText.contains(allergen, ignoreCase = true)) {
-                        personalizedWarnings.add(
-                            ConditionWarning(
-                                condition = "⚠️ Allergen Detected ($allergen)",
-                                message = "Matches your flagged allergen blacklist."
-                            )
-                        )
-                    }
-                }
-
-                // Append general AI warnings
-                dynamicResult.warnings.forEach { (condition, message) ->
-                    personalizedWarnings.add(ConditionWarning(condition = condition, message = message))
-                }
-
                 val resolvedProductName = detection.verifiedProductName ?: dynamicResult.productName
 
+                // 5. Package full analysis report
                 val fullAnalysis = FullProductAnalysis(
                     productName = resolvedProductName,
                     brandName = detection.verifiedBrand,
@@ -144,16 +81,17 @@ class ScannerViewModel : ViewModel() {
                     scoreOutOf100 = dynamicResult.score,
                     ratingVerdict = dynamicResult.verdict,
                     summaryInSimpleLanguage = dynamicResult.summary,
+                    aiExplanation = dynamicResult.aiExplanation,
                     scoreAuditExplanation = dynamicResult.scoreAuditReason,
                     scoreFactors = dynamicResult.scoreFactors,
                     nutritionTable = dynamicResult.nutritionTable,
                     fullIngredientsList = dynamicResult.fullIngredientsList,
                     simplifiedIngredients = dynamicResult.simplifiedIngredients,
                     healthBenefits = dynamicResult.healthBenefits,
-                    conditionWarnings = personalizedWarnings,
                     containsPalmOil = dynamicResult.containsPalmOil,
                     palmOilDetails = dynamicResult.palmOilDetails,
-                    suggestedAlternatives = enrichedAlternatives
+                    suggestedAlternatives = enrichedAlternatives,
+                    personalizedWarnings = dynamicResult.personalizedWarnings
                 )
 
                 _uiState.value = ScanUiState.Success(

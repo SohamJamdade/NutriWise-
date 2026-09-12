@@ -49,6 +49,13 @@ data class ConditionWarning(
     val message: String
 )
 
+// Dynamic Health Directive Warning generated against user-declared conditions
+data class DynamicHealthWarning(
+    val condition: String,    // e.g., "Diabetes", "PCOS", "Walnut Allergy"
+    val severity: String,     // "CRITICAL", "MODERATE", "SAFE"
+    val reason: String        // Detailed explanation of contraindication
+)
+
 data class HealthProfile(
     val hasDiabetes: Boolean = false,
     val hasHypertension: Boolean = false,
@@ -85,5 +92,7 @@ data class FullProductAnalysis(
     val containsPalmOil: Boolean = false,
     val palmOilDetails: String? = null,
     val allergenWarnings: List<String> = emptyList(),
-    val suggestedAlternatives: List<HealthAlternative> = emptyList()
+    val suggestedAlternatives: List<HealthAlternative> = emptyList(),
+    // Added: Dynamic health directives generated against the user's custom survey profile
+    val personalizedWarnings: List<DynamicHealthWarning> = emptyList()
 )

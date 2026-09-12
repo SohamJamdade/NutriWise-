@@ -82,11 +82,13 @@ class AuthViewModel : ViewModel() {
             val profile = UserProfile(
                 username = username,
                 email = email,
-                hasDiabetes = hasDiabetes,
-                hasHypertension = hasHypertension,
-                hasHighCholesterol = hasHighCholesterol,
-                allergenAvoidList = allergens,
-                otherConditions = otherConditions
+                healthConditions = buildList {
+                    if (hasDiabetes) add("Diabetes / Blood Sugar")
+                    if (hasHypertension) add("Hypertension (High BP)")
+                    if (hasHighCholesterol) add("High Cholesterol")
+                    addAll(allergens)
+                    addAll(otherConditions)
+                }
             )
             val result = repository.signUp(email, pass, username, profile)
             if (result.isSuccess) {
@@ -102,6 +104,31 @@ class AuthViewModel : ViewModel() {
         viewModelScope.launch {
             repository.updateHealthProfile(updated)
             _userProfile.value = updated
+        }
+    }
+
+    // Handles survey completion and persists state to Firebase
+    fun completeSurvey(conditions: List<String>) {
+        viewModelScope.launch {
+            val result = repository.completeHealthSurvey(conditions)
+            if (result.isSuccess) {
+                _userProfile.value = _userProfile.value?.copy(
+                    healthConditions = conditions,
+                    isSurveyCompleted = true
+                )
+            }
+        }
+    }
+
+    // Dynamic condition updates from the Profile screen
+    fun updateConditionsFromProfile(newConditions: List<String>) {
+        viewModelScope.launch {
+            val result = repository.updateUserHealthConditions(newConditions)
+            if (result.isSuccess) {
+                _userProfile.value = _userProfile.value?.copy(
+                    healthConditions = newConditions
+                )
+            }
         }
     }
 

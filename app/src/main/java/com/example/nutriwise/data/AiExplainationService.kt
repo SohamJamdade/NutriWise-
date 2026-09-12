@@ -1,6 +1,7 @@
 package com.example.nutriwise.data
 
 import android.util.Log
+import com.example.nutriwise.domain.DynamicHealthWarning
 import com.example.nutriwise.domain.HealthAlternative
 import com.example.nutriwise.domain.MacroComparison
 import com.example.nutriwise.domain.NutritionFact
@@ -20,6 +21,7 @@ data class DynamicAiResult(
     val score: Int,
     val verdict: String,
     val summary: String,
+    val aiExplanation: String,
     val scoreAuditReason: String,
     val scannedMacroSummary: String,
     val nutritionTable: List<NutritionFact>,
@@ -30,279 +32,359 @@ data class DynamicAiResult(
     val warnings: List<Pair<String, String>>,
     val containsPalmOil: Boolean,
     val palmOilDetails: String?,
-    val dynamicAlternatives: List<HealthAlternative>
+    val dynamicAlternatives: List<HealthAlternative>,
+    val personalizedWarnings: List<DynamicHealthWarning>
 )
 
 class AiExplanationService(private val apiKey: String) {
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(35, TimeUnit.SECONDS)
-        .readTimeout(35, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val supportedModels = listOf(
-        "llama-3.1-8b-instant",
-        "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b"
-    )
+    suspend fun analyzeLabelDynamically(
+        scannedText: String,
+        detectedBrandHint: String? = null,
+        userConditions: List<String> = emptyList()
+    ): DynamicAiResult = withContext(Dispatchers.IO) {
 
-    suspend fun analyzeLabelDynamically(scannedText: String, detectedBrandHint: String? = null): DynamicAiResult = withContext(Dispatchers.IO) {
-        val systemPrompt = """
-            You are an authoritative, clinical food toxicologist, dietary forensic auditor, and regulatory specialist in Indian FMCG packaged foods and FSSAI standards.
-            Operate dynamically: clean and tokenize noisy OCR text, extract accurate nutrition facts, decode additives, and dynamically recommend 2 real, cleaner-label Indian packaged food alternatives in the exact same snack category available on quick-commerce apps (Blinkit, Zepto, Swiggy Instamart).
-        """.trimIndent()
+        val trimmedKey = apiKey.trim()
 
-        val userPrompt = """
-            INPUT SCANNED OCR & CONTEXT:
+        // Google Gemini keys (both modern "AQ." and legacy "AIzaSy" formats)
+        if (trimmedKey.startsWith("AQ.") || trimmedKey.startsWith("AIzaSy")) {
+            return@withContext callGeminiApi(trimmedKey, scannedText, detectedBrandHint, userConditions)
+        }
+
+        // Groq, Cerebras, xAI OpenAI-compatible fallback
+        return@withContext callOpenAiCompatibleApi(trimmedKey, scannedText, detectedBrandHint, userConditions)
+    }
+
+    private fun callGeminiApi(
+        key: String,
+        scannedText: String,
+        detectedBrandHint: String?,
+        userConditions: List<String>
+    ): DynamicAiResult {
+        val conditionsText = if (userConditions.isNotEmpty()) {
+            userConditions.joinToString(", ")
+        } else {
+            "None specified (general public health evaluation)"
+        }
+        val prompt = """
+            You are an authoritative clinical food forensic auditor and regulatory specialist in FSSAI and Indian packaged foods.
+            
+            OBJECTIVE:
+            Extract or calculate complete nutritional facts and evaluate the scanned food item.
+            
+            DATA CONTEXT:
+            Scanned OCR Text:
             \"\"\"
             $scannedText
-            ${if (!detectedBrandHint.isNullOrBlank()) "VERIFIED REFERENCE: $detectedBrandHint" else ""}
             \"\"\"
+            Verified Brand/Product Hint: ${detectedBrandHint ?: "Indian packaged snack/food"}
+            User Specific Profile: [$conditionsText]
 
-            EXECUTE DYNAMIC FORENSIC ANALYSIS:
-            1. Clean & Tokenize Ingredients: Split every ingredient into an individual array item with all declared percentages preserved.
-            2. Standard Nutrition Panel per 100g: Energy (kcal), Carbohydrates (g), Added Sugars (g), Total Fat (g), Saturated Fat (g), Trans Fat (g), Protein (g), Sodium (mg) with Status ("Low", "Moderate", "High").
-            3. Decode Additives: Decode all detected INS numbers into objective functional roles.
-            4. Auditable NutriWise Score (15-95) with 5 Score Factors (Processing Degree, Added Sugars, Saturated Fat, Sodium Load, Additive Load).
-            5. DYNAMIC SAME-CATEGORY SWAPS (2 items):
-               - Suggest 2 real, commercially available cleaner Indian branded packaged products in the EXACT same category (e.g. if tea biscuits -> cleaner whole grain/millet biscuits; if spicy fried crisps -> roasted makhana or popped chips; if instant noodles -> millet/air-dried noodles).
-               - Provide health score out of 100 (75-95).
-               - Give a clean, short search keyword for quick commerce search bars.
-               - Provide a head-to-head comparison between scanned product and the suggested swap.
+            CRITICAL NUTRITION EXTRACTION RULES:
+            1. Extract exact per 100g numbers from the scan if visible.
+            2. If an essential metric (Energy, Carbs, Added Sugars, Total Fat, Saturated Fat, Trans Fat, Protein, Sodium) is partly cropped or obscured by OCR, USE YOUR VERIFIED DATABASE KNOWLEDGE of this exact Indian product/category to provide accurate standard values per 100g.
+            3. DO NOT output "Not Declared" unless the nutrient is genuinely inapplicable (e.g. Sodium in table sugar). Always provide realistic, standard values with proper units (e.g., "520 kcal", "68g", "22g", "120mg").
+            4. Assign an accurate status ("Low", "Moderate", "High") according to standard WHO guidelines.
+            5. Decode all INS/E-number additives into plain English functional explanations.
+            6. Suggest 2 real, cleaner packaged alternatives sold on Indian quick-commerce (Blinkit, Zepto, Swiggy Instamart).
 
-            Respond STRICTLY in valid JSON matching this schema:
+            Output MUST be valid JSON matching this schema:
             {
-              "productName": "<Brand + Full Variant Name>",
-              "score": <Calculated Integer 15-95>,
+              "productName": "<Exact brand and product name>",
+              "score": 45,
               "verdict": "<Nutritious Choice | Moderate / Occasional Choice | Ultra-Processed / Consume Sparingly>",
               "summary": "<Objective 2-sentence clinical assessment>",
+              "aiExplanation": "<2-3 sentence personalized verdict addressing user's declared profile>",
               "scoreAuditReason": "<1-sentence breakdown of why this score was calculated>",
               "scannedMacroSummary": "<e.g. 74% Refined Maida + Palm Oil>",
               "nutritionTable": [
-                {"nutrientName": "Energy", "amountPer100g": "450 kcal", "status": "Moderate"},
-                {"nutrientName": "Carbohydrates", "amountPer100g": "78 g", "status": "High"},
-                {"nutrientName": "Added Sugars", "amountPer100g": "21.5 g", "status": "High"},
-                {"nutrientName": "Total Fat", "amountPer100g": "11.5 g", "status": "Moderate"},
-                {"nutrientName": "Saturated Fat", "amountPer100g": "5.2 g", "status": "Moderate"},
-                {"nutrientName": "Trans Fat", "amountPer100g": "0 g", "status": "Low"},
-                {"nutrientName": "Protein", "amountPer100g": "7.5 g", "status": "Moderate"},
-                {"nutrientName": "Sodium", "amountPer100g": "290 mg", "status": "Low"}
+                {"nutrientName": "Energy", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Carbohydrates", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Added Sugars", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Total Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Saturated Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Trans Fat", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Protein", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"},
+                {"nutrientName": "Sodium", "amountPer100g": "<Value with unit>", "status": "<Low|Moderate|High>"}
               ],
               "scoreFactors": [
-                {"factorName": "Processing Degree", "status": "<Status>", "isFavorable": <true/false>},
-                {"factorName": "Added Sugars", "status": "<Status>", "isFavorable": <true/false>},
-                {"factorName": "Saturated Fat", "status": "<Status>", "isFavorable": <true/false>},
-                {"factorName": "Sodium Load", "status": "<Status>", "isFavorable": <true/false>},
-                {"factorName": "Additive Load", "status": "<Status>", "isFavorable": <true/false>}
+                {"factorName": "Processing Degree", "status": "High", "isFavorable": false},
+                {"factorName": "Added Sugars", "status": "Moderate", "isFavorable": false},
+                {"factorName": "Saturated Fat", "status": "High", "isFavorable": false},
+                {"factorName": "Sodium Load", "status": "Moderate", "isFavorable": true},
+                {"factorName": "Additive Load", "status": "High", "isFavorable": false}
               ],
               "fullIngredientsList": [
-                "<Individual Cleaned Ingredient with percentage if present>"
+                "<Individual ingredient names cleaned from OCR>"
               ],
               "simplifiedIngredients": [
                 "<INS Code and Name>: <Neutral functional explanation>"
               ],
-              "containsPalmOil": <true/false>,
+              "containsPalmOil": false,
               "palmOilDetails": "<Factual oil note or null>",
-              "healthBenefits": ["<Evidence-based fact or 'Provides quick dietary carbohydrates'>"],
+              "healthBenefits": ["<Evidence-based health benefit>"],
               "warnings": [
-                {"condition": "Nutrient Note: <Metric>", "message": "<Measured observation>"}
+                {"condition": "Nutrient Note", "message": "<Clinical observation>"}
+              ],
+              "personalizedWarnings": [
+                {
+                  "condition": "<User Condition Name>",
+                  "severity": "CRITICAL",
+                  "reason": "<Specific reason why this product affects the condition>"
+                }
               ],
               "dynamicAlternatives": [
                 {
-                  "name": "<Real Indian Cleaner Product Name>",
-                  "scoreOutOf100": <Integer 75-95>,
-                  "whyBetterThanScanned": "<Direct head-to-head advantage>",
-                  "cleanSearchQuery": "<Short search query for Blinkit/Zepto/Instamart>",
-                  "alternativeSummary": "<e.g. 100% Whole Millets • 0% Palm Oil>",
-                  "reason": "<Nutritional reason>"
+                  "name": "<Real cleaner Indian alternative brand and product>",
+                  "scoreOutOf100": 85,
+                  "whyBetterThanScanned": "<Direct comparative nutritional advantage>",
+                  "cleanSearchQuery": "<Precise search query for Blinkit/Zepto/Instamart>",
+                  "alternativeSummary": "<e.g. 100% Whole Wheat • Zero Palm Oil>",
+                  "reason": "<Reason for recommendation>"
                 }
               ]
             }
         """.trimIndent()
 
-        var lastError: Exception? = null
+        // Modern Gemini 2.0 / 2.5 flash models
 
-        for (modelId in supportedModels) {
+        var lastError: Exception? = null
+        val candidateModels = listOf(
+            "gemini-3.6-flash",
+            "gemini-2.5-flash"
+        )
+        for (modelName in candidateModels) {
             try {
-                val requestJson = JSONObject().apply {
-                    put("model", modelId)
-                    put("response_format", JSONObject().put("type", "json_object"))
-                    put("temperature", 0.1)
-                    put("messages", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("role", "system")
-                            put("content", systemPrompt)
-                        })
+                val payload = JSONObject().apply {
+                    put("contents", JSONArray().apply {
                         put(JSONObject().apply {
                             put("role", "user")
-                            put("content", userPrompt)
+                            put("parts", JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("text", prompt)
+                                })
+                            })
                         })
+                    })
+                    put("generationConfig", JSONObject().apply {
+                        put("responseMimeType", "application/json")
+                        put("temperature", 0.2)
                     })
                 }
 
                 val request = Request.Builder()
-                    .url("https://api.groq.com/openai/v1/chat/completions")
-                    .addHeader("Authorization", "Bearer $apiKey")
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$key")
+                    .addHeader("x-goog-api-key", key) // Required for AQ. authentication keys
                     .addHeader("Content-Type", "application/json")
-                    .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
                 val response = httpClient.newCall(request).execute()
-                val responseBody = response.body?.string() ?: ""
+                val responseBody = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    Log.w("NutriWiseAI", "Model $modelId failed: $responseBody. Trying next...")
+                    val err = "Gemini API Error ($modelName ${response.code}):$responseBody"
+                    Log.w("NutriWiseAI", err)
+                    lastError = Exception(err)
                     continue
                 }
 
-                val rootJson = JSONObject(responseBody)
-                val rawContent = rootJson.getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
+                val root = JSONObject(responseBody)
+                val candidates = root.optJSONArray("candidates") ?: throw Exception("No candidates returned from Gemini")
+                val content = candidates.getJSONObject(0).getJSONObject("content")
+                val text = content.getJSONArray("parts").getJSONObject(0).getString("text")
 
-                val cleanJson = rawContent.substring(rawContent.indexOf('{'), rawContent.lastIndexOf('}') + 1)
-                val jsonObj = JSONObject(cleanJson)
-
-                val productName = jsonObj.optString("productName", "Scanned Food Product")
-                val score = jsonObj.optInt("score", 45).coerceIn(15, 95)
-                val verdict = jsonObj.optString("verdict", "Moderate / Occasional Choice")
-                val summary = jsonObj.optString("summary", "Product evaluated.")
-                val auditReason = jsonObj.optString("scoreAuditReason", "Score evaluated based on ingredient processing.")
-                val macroSummary = jsonObj.optString("scannedMacroSummary", "Refined Ingredients")
-                val containsPalm = jsonObj.optBoolean("containsPalmOil", false)
-                val palmDetails = if (jsonObj.isNull("palmOilDetails")) null else jsonObj.optString("palmOilDetails")
-
-                // 1. Nutrition Table
-                val nutritionList = mutableListOf<NutritionFact>()
-                val nutArray = jsonObj.optJSONArray("nutritionTable")
-                if (nutArray != null) {
-                    for (i in 0 until nutArray.length()) {
-                        val nObj = nutArray.getJSONObject(i)
-                        nutritionList.add(
-                            NutritionFact(
-                                nutrientName = nObj.optString("nutrientName"),
-                                amountPer100g = nObj.optString("amountPer100g"),
-                                status = nObj.optString("status")
-                            )
-                        )
-                    }
-                }
-
-                // 2. Score Factors
-                val factorsList = mutableListOf<ScoreFactor>()
-                val factorsArray = jsonObj.optJSONArray("scoreFactors")
-                if (factorsArray != null) {
-                    for (i in 0 until factorsArray.length()) {
-                        val fObj = factorsArray.getJSONObject(i)
-                        factorsList.add(
-                            ScoreFactor(
-                                factorName = fObj.optString("factorName", "Factor"),
-                                status = fObj.optString("status", "Moderate"),
-                                isFavorable = fObj.optBoolean("isFavorable", false)
-                            )
-                        )
-                    }
-                }
-
-                // 3. Full Ingredients
-                val fullIngList = mutableListOf<String>()
-                val fullIngArray = jsonObj.optJSONArray("fullIngredientsList")
-                if (fullIngArray != null) {
-                    for (i in 0 until fullIngArray.length()) {
-                        fullIngList.add(fullIngArray.getString(i))
-                    }
-                }
-
-                // 4. Simplified Additives
-                val simplifiedList = mutableListOf<String>()
-                val simplifiedArray = jsonObj.optJSONArray("simplifiedIngredients")
-                if (simplifiedArray != null) {
-                    for (i in 0 until simplifiedArray.length()) {
-                        val rawText = simplifiedArray.getString(i)
-                        val parts = rawText.split(":", limit = 2)
-                        val formatted = if (parts.size == 2 && parts[0].contains("INS", ignoreCase = true)) {
-                            InsAdditiveDatabase.decodeAdditive(parts[0])
-                        } else {
-                            rawText
-                        }
-                        simplifiedList.add(formatted)
-                    }
-                }
-
-                // 5. Health Benefits
-                val benefitsList = mutableListOf<String>()
-                val benefitsArray = jsonObj.optJSONArray("healthBenefits")
-                if (benefitsArray != null) {
-                    for (i in 0 until benefitsArray.length()) {
-                        benefitsList.add(benefitsArray.getString(i))
-                    }
-                }
-
-                // 6. Warnings
-                val warningsList = mutableListOf<Pair<String, String>>()
-                val warningsArray = jsonObj.optJSONArray("warnings")
-                if (warningsArray != null) {
-                    for (i in 0 until warningsArray.length()) {
-                        val item = warningsArray.getJSONObject(i)
-                        warningsList.add(item.getString("condition") to item.getString("message"))
-                    }
-                }
-
-                // 7. Dynamic Alternatives
-                val dynamicAltsList = mutableListOf<HealthAlternative>()
-                val altsArray = jsonObj.optJSONArray("dynamicAlternatives")
-                if (altsArray != null) {
-                    for (i in 0 until altsArray.length()) {
-                        val altObj = altsArray.getJSONObject(i)
-                        val altName = altObj.optString("name", "Healthy Alternative")
-                        val altScore = altObj.optInt("scoreOutOf100", 85)
-                        val whyBetter = altObj.optString("whyBetterThanScanned", "Cleaner ingredients and zero palm oil.")
-                        val cleanQuery = altObj.optString("cleanSearchQuery", altName)
-                        val altSummary = altObj.optString("alternativeSummary", "Whole Food Ingredients")
-
-                        dynamicAltsList.add(
-                            HealthAlternative(
-                                name = altName,
-                                estimatedPrice = null,
-                                scoreOutOf100 = altScore,
-                                whyBetterThanScanned = whyBetter,
-                                cleanSearchQuery = cleanQuery,
-                                imageUrl = null, // Will be fetched dynamically by DynamicProductImageService
-                                availableOn = listOf("Blinkit", "Zepto", "Instamart"),
-                                macroComparison = MacroComparison(
-                                    scannedSummary = macroSummary,
-                                    alternativeSummary = altSummary
-                                ),
-                                reason = altObj.optString("reason", "Superior nutrient profile.")
-                            )
-                        )
-                    }
-                }
-
-                return@withContext DynamicAiResult(
-                    productName = productName,
-                    score = score,
-                    verdict = verdict,
-                    summary = summary,
-                    scoreAuditReason = auditReason,
-                    scannedMacroSummary = macroSummary,
-                    nutritionTable = nutritionList,
-                    scoreFactors = factorsList,
-                    fullIngredientsList = fullIngList,
-                    simplifiedIngredients = simplifiedList,
-                    healthBenefits = benefitsList,
-                    warnings = warningsList,
-                    containsPalmOil = containsPalm,
-                    palmOilDetails = palmDetails,
-                    dynamicAlternatives = dynamicAltsList
-                )
+                return parseCleanJson(text, detectedBrandHint)
             } catch (e: Exception) {
                 lastError = e
-                Log.w("NutriWiseAI", "Model $modelId threw exception: ${e.message}")
+                Log.w("NutriWiseAI", "Model $modelName call failed:${e.message}")
             }
         }
 
-        throw IllegalStateException("All models failed: ${lastError?.message}")
+        throw IllegalStateException("Gemini Analysis failed: ${lastError?.message}")
+    }
+
+    private fun callOpenAiCompatibleApi(
+        key: String,
+        scannedText: String,
+        detectedBrandHint: String?,
+        userConditions: List<String>
+    ): DynamicAiResult {
+        val url = when {
+            key.startsWith("gsk_") -> "https://api.groq.com/openai/v1/chat/completions"
+            key.startsWith("xai-") -> "https://api.x.ai/v1/chat/completions"
+            key.startsWith("csk-") -> "https://api.cerebras.ai/v1/chat/completions"
+            else -> "https://api.groq.com/openai/v1/chat/completions"
+        }
+
+        val model = when {
+            key.startsWith("gsk_") -> "llama-3.3-70b-versatile"
+            key.startsWith("xai-") -> "grok-2"
+            key.startsWith("csk-") -> "llama3.1-8b"
+            else -> "llama-3.3-70b-versatile"
+        }
+
+        val conditionsText = if (userConditions.isNotEmpty()) userConditions.joinToString(", ") else "None"
+        val prompt = "Extract nutritional facts and evaluate for: $conditionsText. Scanned text:\n$scannedText"
+
+        val requestJson = JSONObject().apply {
+            put("model", model)
+            put("temperature", 0.0)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+            })
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) throw IllegalStateException("API Error: $body")
+
+        val raw = JSONObject(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+        return parseCleanJson(raw, detectedBrandHint)
+    }
+
+    private fun parseCleanJson(rawContent: String, detectedBrandHint: String?): DynamicAiResult {
+        val startIdx = rawContent.indexOf('{')
+        val endIdx = rawContent.lastIndexOf('}')
+        val cleanJson = if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+            rawContent.substring(startIdx, endIdx + 1)
+        } else {
+            rawContent.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        }
+
+        val jsonObj = JSONObject(cleanJson)
+
+        val productName = jsonObj.optString("productName", detectedBrandHint ?: "Scanned Food Product")
+        val score = jsonObj.optInt("score", 45).coerceIn(15, 95)
+        val verdict = jsonObj.optString("verdict", "Moderate / Occasional Choice")
+        val summary = jsonObj.optString("summary", "Product evaluated.")
+        val aiExplanation = jsonObj.optString("aiExplanation", "Nutritional evaluation completed.")
+        val auditReason = jsonObj.optString("scoreAuditReason", "Score evaluated based on ingredient processing.")
+        val macroSummary = jsonObj.optString("scannedMacroSummary", "Refined Ingredients")
+        val containsPalm = jsonObj.optBoolean("containsPalmOil", false)
+        val palmDetails = if (jsonObj.isNull("palmOilDetails")) null else jsonObj.optString("palmOilDetails")
+
+        val nutritionList = mutableListOf<NutritionFact>()
+        jsonObj.optJSONArray("nutritionTable")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val nObj = arr.getJSONObject(i)
+                nutritionList.add(
+                    NutritionFact(
+                        nutrientName = nObj.optString("nutrientName"),
+                        amountPer100g = nObj.optString("amountPer100g"),
+                        status = nObj.optString("status")
+                    )
+                )
+            }
+        }
+
+        val factorsList = mutableListOf<ScoreFactor>()
+        jsonObj.optJSONArray("scoreFactors")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val fObj = arr.getJSONObject(i)
+                factorsList.add(
+                    ScoreFactor(
+                        factorName = fObj.optString("factorName", "Factor"),
+                        status = fObj.optString("status", "Moderate"),
+                        isFavorable = fObj.optBoolean("isFavorable", false)
+                    )
+                )
+            }
+        }
+
+        val fullIngList = mutableListOf<String>()
+        jsonObj.optJSONArray("fullIngredientsList")?.let { arr ->
+            for (i in 0 until arr.length()) fullIngList.add(arr.getString(i))
+        }
+
+        val simplifiedList = mutableListOf<String>()
+        jsonObj.optJSONArray("simplifiedIngredients")?.let { arr ->
+            for (i in 0 until arr.length()) simplifiedList.add(arr.getString(i))
+        }
+
+        val benefitsList = mutableListOf<String>()
+        jsonObj.optJSONArray("healthBenefits")?.let { arr ->
+            for (i in 0 until arr.length()) benefitsList.add(arr.getString(i))
+        }
+
+        val warningsList = mutableListOf<Pair<String, String>>()
+        jsonObj.optJSONArray("warnings")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val item = arr.getJSONObject(i)
+                warningsList.add(item.getString("condition") to item.getString("message"))
+            }
+        }
+
+        val personalizedWarningsList = mutableListOf<DynamicHealthWarning>()
+        jsonObj.optJSONArray("personalizedWarnings")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val pObj = arr.getJSONObject(i)
+                personalizedWarningsList.add(
+                    DynamicHealthWarning(
+                        condition = pObj.optString("condition", "Health Note"),
+                        severity = pObj.optString("severity", "MODERATE"),
+                        reason = pObj.optString("reason", "")
+                    )
+                )
+            }
+        }
+
+        val dynamicAltsList = mutableListOf<HealthAlternative>()
+        jsonObj.optJSONArray("dynamicAlternatives")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val altObj = arr.getJSONObject(i)
+                dynamicAltsList.add(
+                    HealthAlternative(
+                        name = altObj.optString("name", "Healthy Alternative"),
+                        estimatedPrice = null,
+                        scoreOutOf100 = altObj.optInt("scoreOutOf100", 85),
+                        whyBetterThanScanned = altObj.optString("whyBetterThanScanned", "Cleaner ingredients."),
+                        cleanSearchQuery = altObj.optString("cleanSearchQuery", altObj.optString("name")),
+                        imageUrl = null,
+                        availableOn = listOf("Blinkit", "Zepto", "Instamart"),
+                        macroComparison = MacroComparison(
+                            scannedSummary = macroSummary,
+                            alternativeSummary = altObj.optString("alternativeSummary", "Whole Food Ingredients")
+                        ),
+                        reason = altObj.optString("reason", "Superior nutrient profile.")
+                    )
+                )
+            }
+        }
+
+        return DynamicAiResult(
+            productName = productName,
+            score = score,
+            verdict = verdict,
+            summary = summary,
+            aiExplanation = aiExplanation,
+            scoreAuditReason = auditReason,
+            scannedMacroSummary = macroSummary,
+            nutritionTable = nutritionList,
+            scoreFactors = factorsList,
+            fullIngredientsList = fullIngList,
+            simplifiedIngredients = simplifiedList,
+            healthBenefits = benefitsList,
+            warnings = warningsList,
+            containsPalmOil = containsPalm,
+            palmOilDetails = palmDetails,
+            dynamicAlternatives = dynamicAltsList,
+            personalizedWarnings = personalizedWarningsList
+        )
     }
 }

@@ -6,9 +6,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,7 +21,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.nutriwise.ui.AnalysisResultScreen
 import com.example.nutriwise.ui.CameraScannerView
@@ -28,6 +36,7 @@ import com.example.nutriwise.ui.auth.AuthViewModel
 import com.example.nutriwise.ui.feed.CommunityFeedScreen
 import com.example.nutriwise.ui.feed.FeedViewModel
 import com.example.nutriwise.ui.profile.NutriWiseProfileScreen
+import com.example.nutriwise.ui.auth.HealthSurveyScreen
 import com.example.nutriwise.ui.theme.NutriWiseTheme
 
 class MainActivity : ComponentActivity() {
@@ -41,18 +50,43 @@ class MainActivity : ComponentActivity() {
             NutriWiseTheme(darkTheme = isDarkMode) {
                 val authViewModel: AuthViewModel = viewModel()
                 val authState by authViewModel.uiState.collectAsState()
+                val userProfile by authViewModel.userProfile.collectAsState()
 
-                if (authState !is AuthUiState.Authenticated) {
-                    AuthScreen(
-                        viewModel = authViewModel,
-                        onAuthSuccess = { authViewModel.loadUserProfile() }
-                    )
-                } else {
-                    MainAppScaffold(
-                        authViewModel = authViewModel,
-                        isDarkMode = isDarkMode,
-                        onToggleTheme = { isDarkMode = !isDarkMode }
-                    )
+                when {
+                    authState !is AuthUiState.Authenticated -> {
+                        AuthScreen(
+                            viewModel = authViewModel,
+                            onAuthSuccess = { authViewModel.loadUserProfile() }
+                        )
+                    }
+// 2. Waiting for profile data from Firebase -> Show Loading Spinner
+                    userProfile == null -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+
+                    // 3. Authenticated but Has Not Completed Survey -> Show Survey ONE TIME
+                    !userProfile!!.isSurveyCompleted -> {
+                        HealthSurveyScreen(
+                            currentProfile = userProfile!!,
+                            onSurveyComplete = { conditions ->
+                                authViewModel.completeSurvey(conditions)
+                            }
+                        )
+                    }
+
+                    // 4. Survey Completed -> Proceed to Main Application
+                    else -> {
+                        MainAppScaffold(
+                            authViewModel = authViewModel,
+                            isDarkMode = isDarkMode,
+                            onToggleTheme = { isDarkMode = !isDarkMode }
+                        )
+                    }
                 }
             }
         }
@@ -125,10 +159,67 @@ fun MainAppScaffold(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(48.dp)
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(modifier = Modifier.padding(top = 16.dp))
+                                    Text(
+                                        text = "Analyzing nutrition label with AI...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onBackground
+                                    )
+                                }
+                            }
+                        }
+                        is ScanUiState.Error -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(20.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = "Error",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(48.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = "Scan Issue",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = state.message,
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                        Button(
+                                            onClick = { scannerViewModel.resetScan() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                        ) {
+                                            Text("Try Again")
+                                        }
+                                    }
+                                }
                             }
                         }
                         else -> {

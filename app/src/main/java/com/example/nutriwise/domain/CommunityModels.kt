@@ -13,7 +13,9 @@ data class UserProfile(
     val hasHighCholesterol: Boolean = false,
     val isHighProteinGoal: Boolean = false,
     val allergenAvoidList: List<String> = emptyList(),
-    val otherConditions: List<String> = emptyList()
+    val otherConditions: List<String> = emptyList(),
+    val healthConditions: List<String> = emptyList(),
+    val isSurveyCompleted: Boolean = false
 )
 
 @IgnoreExtraProperties

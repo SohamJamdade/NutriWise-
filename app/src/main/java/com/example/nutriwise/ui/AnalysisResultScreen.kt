@@ -201,6 +201,126 @@ fun AnalysisResultScreen(
                     )
                 }
             }
+            if (analysis.personalizedWarnings.isNotEmpty()) {
+                Text(
+                    text = "Personal Health Directives",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                analysis.personalizedWarnings.forEach { warning ->
+                    val cardColor = when (warning.severity.uppercase()) {
+                        "CRITICAL" -> Color(0xFFFFEBEE)
+                        "MODERATE" -> Color(0xFFFFF3E0)
+                        else -> Color(0xFFE8F5E9)
+                    }
+                    val iconColor = when (warning.severity.uppercase()) {
+                        "CRITICAL" -> Color(0xFFC62828)
+                        "MODERATE" -> Color(0xFFE65100)
+                        else -> Color(0xFF2E7D32)
+                    }
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = cardColor),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text(
+                                text = when (warning.severity.uppercase()) {
+                                    "CRITICAL" -> "🚫"
+                                    "MODERATE" -> "⚠️"
+                                    else -> "✅"
+                                },
+                                fontSize = 20.sp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "${warning.condition} Directive",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = iconColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = warning.reason,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = Color(0xFF263238)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Inside ui/AnalysisResultScreen.kt (under the Product Health Score Hero Card):
+
+// -------------------------------------------------------------
+// DEDICATED AI HEALTH VERDICT FOR YOUR PROFILE
+// -------------------------------------------------------------
+            val hasCriticalWarning = analysis.personalizedWarnings.any { it.severity.equals("CRITICAL", ignoreCase = true) }
+            val hasModerateWarning = analysis.personalizedWarnings.any { it.severity.equals("MODERATE", ignoreCase = true) }
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        hasCriticalWarning -> Color(0xFF2D1517)
+                        hasModerateWarning -> Color(0xFF2B1F13)
+                        else -> Color(0xFF14241B)
+                    }
+                ),
+                border = BorderStroke(
+                    1.5.dp,
+                    when {
+                        hasCriticalWarning -> Color(0xFFEF5350)
+                        hasModerateWarning -> Color(0xFFFFB74D)
+                        else -> Color(0xFF81C784)
+                    }
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = when {
+                                hasCriticalWarning -> "🚫 AI Advice: Not Recommended for You"
+                                hasModerateWarning -> "⚠️ AI Advice: Consume with Caution"
+                                else -> "✅ AI Advice: Safe for Your Health Profile"
+                            },
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp,
+                            color = when {
+                                hasCriticalWarning -> Color(0xFFFF8A80)
+                                hasModerateWarning -> Color(0xFFFFD54F)
+                                else -> Color(0xFFA5D6A7)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // AI explanation
+                    Text(
+                        text = if (analysis.personalizedWarnings.isNotEmpty()) {
+                            analysis.personalizedWarnings.joinToString(separator = "\n\n") { warning ->
+                                "• ${warning.condition}: ${warning.reason}"
+                            }
+                        } else {
+                            "Based on your health directives, this product does not contain ingredients that conflict with your profile."
+                        },
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = Color(0xFFECEFF1)
+                    )
+                }
+            }
 
             // -------------------------------------------------------------
             // 2. NUTRITIONAL ASSESSMENT SUMMARY

@@ -22,7 +22,7 @@ import com.example.nutriwise.domain.PostComment
 import kotlin.math.max
 
 
-class FirebaseRepository {
+class FirebaseRepository {//
 
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val db: FirebaseDatabase = FirebaseDatabase.getInstance()
@@ -386,4 +386,36 @@ class FirebaseRepository {
             Result.failure(e)
         }
     }
-}//
+
+    // Inside data/FirebaseRepository.kt:
+
+    /**
+     * Saves survey answers and marks survey as completed in Firebase
+     */
+    suspend fun completeHealthSurvey(conditions: List<String>): Result<Unit> {
+        val uid = currentUserId ?: return Result.failure(IllegalStateException("Not logged in"))
+        return try {
+            val updates = mapOf(
+                "healthConditions" to conditions,
+                "isSurveyCompleted" to true
+            )
+            usersRef.child(uid).updateChildren(updates).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Allows the user to update their health conditions from the Profile tab anytime
+     */
+    suspend fun updateUserHealthConditions(conditions: List<String>): Result<Unit> {
+        val uid = currentUserId ?: return Result.failure(IllegalStateException("Not logged in"))
+        return try {
+            usersRef.child(uid).child("healthConditions").setValue(conditions).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}

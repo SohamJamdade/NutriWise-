@@ -3,14 +3,13 @@ package com.example.nutriwise.ui.profile
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -28,7 +27,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.nutriwise.domain.ReviewPost
-import com.example.nutriwise.domain.UserProfile
 import com.example.nutriwise.ui.auth.AuthViewModel
 import com.example.nutriwise.ui.feed.FeedViewModel
 import com.example.nutriwise.ui.feed.InstagramPostCard
@@ -45,17 +43,9 @@ fun NutriWiseProfileScreen(
     val user by authViewModel.userProfile.collectAsState()
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = remember { listOf("Reviews", "Health Directives", "About") }
+    val tabs = remember { listOf("Reviews", "Health Directives") }
 
     var showEditDirectivesDialog by remember { mutableStateOf(false) }
-
-    val totalDirectives = remember(user) {
-        val u = user ?: return@remember 0
-        (if (u.hasDiabetes) 1 else 0) +
-                (if (u.hasHypertension) 1 else 0) +
-                (if (u.hasHighCholesterol) 1 else 0) +
-                (u.otherConditions.size)
-    }
 
     LazyColumn(
         modifier = modifier
@@ -69,13 +59,13 @@ fun NutriWiseProfileScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(210.dp)
+                    .height(190.dp)
             ) {
-                // Adaptive Banner Background
+                // Header Gradient
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(150.dp)
+                        .height(130.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = if (isDarkMode) {
@@ -90,55 +80,41 @@ fun NutriWiseProfileScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        // Theme Toggle
+                        FilledIconButton(
+                            onClick = onToggleTheme,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                            ),
+                            modifier = Modifier.size(36.dp)
                         ) {
-                            Text(
-                                text = "u/${user?.username ?: "member"}",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            Icon(
+                                imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                contentDescription = "Toggle Theme",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Theme Toggle Button
-                            FilledIconButton(
-                                onClick = onToggleTheme,
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-                                ),
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = "Toggle Theme",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                        Spacer(modifier = Modifier.width(8.dp))
 
-                            // Logout Button
-                            FilledIconButton(
-                                onClick = { authViewModel.logout() },
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-                                ),
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Logout,
-                                    contentDescription = "Logout",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                        // Logout
+                        FilledIconButton(
+                            onClick = { authViewModel.logout() },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                            ),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Logout,
+                                contentDescription = "Logout",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
@@ -153,7 +129,7 @@ fun NutriWiseProfileScreen(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primaryContainer,
                         border = BorderStroke(3.dp, MaterialTheme.colorScheme.background),
-                        modifier = Modifier.size(88.dp)
+                        modifier = Modifier.size(80.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             val imgUrl = user?.profileImageUrl
@@ -168,8 +144,8 @@ fun NutriWiseProfileScreen(
                                 )
                             } else {
                                 Text(
-                                    text = (user?.username ?: "N").take(1).uppercase(),
-                                    fontSize = 36.sp,
+                                    text = (user?.username ?: "U").take(1).uppercase(),
+                                    fontSize = 32.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -181,7 +157,7 @@ fun NutriWiseProfileScreen(
         }
 
         // -------------------------------------------------------------
-        // 2. USER DETAILS, BADGES & METRICS
+        // 2. USER DETAILS & TAB SELECTION
         // -------------------------------------------------------------
         item {
             Column(
@@ -194,12 +170,20 @@ fun NutriWiseProfileScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = user?.username ?: "Clean Eater",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    Column {
+                        Text(
+                            text = user?.username ?: "NutriWise Member",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = user?.email ?: "",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     OutlinedButton(
                         onClick = { showEditDirectivesDialog = true },
                         shape = RoundedCornerShape(20.dp),
@@ -207,94 +191,19 @@ fun NutriWiseProfileScreen(
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                         modifier = Modifier.height(34.dp)
                     ) {
-                        Text("Edit Directives", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-
-                Text(
-                    text = "u/${user?.username ?: "member"} • ${user?.email ?: ""}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "Scanning packages, avoiding industrial palm oils & decoding ultra-processed food.",
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Badges Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-                    ) {
-                        Text(
-                            text = "🥗 Verified Scanner",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)),
-                        modifier = Modifier.clickable { selectedTab = 1 }
-                    ) {
-                        Text(
-                            text = "🛡️ $totalDirectives Active Directives >",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        )
+                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Directives", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Stats Surface
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        ProfileMetric(count = "${userPosts.size}", label = "Reviews")
-                        ProfileMetric(count = "$totalDirectives", label = "Alerts")
-                        ProfileMetric(count = "${user?.allergenAvoidList?.size ?: 0}", label = "Allergens")
-                        ProfileMetric(count = "Tier 1", label = "Rank")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Tab Header
                 TabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.primary,
-                    divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) }
+                    divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)) }
                 ) {
                     tabs.forEachIndexed { index, title ->
                         Tab(
@@ -336,17 +245,17 @@ fun NutriWiseProfileScreen(
                                     Icons.Default.History,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(44.dp)
+                                    modifier = Modifier.size(40.dp)
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "No Community Reviews Yet",
+                                    text = "No Reviews Shared Yet",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    text = "Scanned products you post to feed appear here.",
+                                    text = "Scanned products you share will appear here.",
                                     color = MaterialTheme.colorScheme.outline,
                                     fontSize = 12.sp
                                 )
@@ -376,7 +285,7 @@ fun NutriWiseProfileScreen(
                                 context.startActivity(Intent.createChooser(sendIntent, "Share Review"))
                             },
                             onDeleteClick = { feedViewModel.deletePost(post.postId) },
-                            onEditClick = { /* Can trigger edit caption modal */ }
+                            onEditClick = {}
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
@@ -385,6 +294,7 @@ fun NutriWiseProfileScreen(
 
             1 -> {
                 item {
+                    val conditions = user?.healthConditions.orEmpty()
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -392,42 +302,32 @@ fun NutriWiseProfileScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
-                            text = "Active Scanner Interceptors",
+                            text = "Active Directives (${conditions.size})",
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
 
-                        if (user?.hasDiabetes == true) {
-                            DirectiveCard(
-                                title = "🩸 Diabetes / Blood Sugar Watch",
-                                desc = "Scanner strictly flags maltodextrin, high dextrose, and added sugar spikes."
-                            )
-                        }
-                        if (user?.hasHypertension == true) {
-                            DirectiveCard(
-                                title = "❤️ Hypertension & Sodium Watch",
-                                desc = "Scanner checks high milligrams of sodium against clinical single-serving thresholds."
-                            )
-                        }
-                        if (user?.hasHighCholesterol == true) {
-                            DirectiveCard(
-                                title = "🫀 Cholesterol / Palm Oil Watch",
-                                desc = "Flags industrial palmolein fractions, trans fats, and hydrogenated oils."
-                            )
-                        }
-                        user?.otherConditions?.forEach { condition ->
-                            DirectiveCard(
-                                title = "🩺 $condition Protocol",
-                                desc = "Scanned items will prioritize warnings for $condition."
-                            )
-                        }
-
-                        if (user?.allergenAvoidList?.isNotEmpty() == true) {
-                            DirectiveCard(
-                                title = "⚠️ Flagged Allergens",
-                                desc = user?.allergenAvoidList?.joinToString(", ") ?: ""
-                            )
+                        if (conditions.isEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "No active health conditions or dietary alerts configured. Tap 'Directives' to add some.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(14.dp)
+                                )
+                            }
+                        } else {
+                            conditions.forEach { condition ->
+                                DirectiveCard(
+                                    title = "🛡️ $condition",
+                                    desc = "The scanner highlights ingredients, additives, and macros flagged for $condition."
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -439,47 +339,7 @@ fun NutriWiseProfileScreen(
                                 .fillMaxWidth()
                                 .height(46.dp)
                         ) {
-                            Text("Modify Health Directives", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            2 -> {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(
-                                text = "Account Details",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                text = "Email: ${user?.email ?: "N/A"}",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                text = "Engine: NutriWise Clinical v2.4",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                text = "Evidence base: OpenFoodFacts + Gemini Multimodal Vision",
-                                color = MaterialTheme.colorScheme.outline,
-                                fontSize = 12.sp
-                            )
+                            Text("Manage Directives", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -493,88 +353,120 @@ fun NutriWiseProfileScreen(
     val currentUser = user
     if (showEditDirectivesDialog && currentUser != null) {
         EditDirectivesDialog(
-            user = currentUser,
+            initialConditions = currentUser.healthConditions,
             onDismiss = { showEditDirectivesDialog = false },
-            onSave = { updatedUser ->
-                authViewModel.saveProfileUpdates(updatedUser)
+            onSave = { updatedConditions ->
+                authViewModel.saveProfileUpdates(
+                    currentUser.copy(healthConditions = updatedConditions)
+                )
                 showEditDirectivesDialog = false
             }
         )
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EditDirectivesDialog(
-    user: UserProfile,
+fun EditDirectivesDialog(
+    initialConditions: List<String>,
     onDismiss: () -> Unit,
-    onSave: (UserProfile) -> Unit
+    onSave: (List<String>) -> Unit
 ) {
-    var diabetes by remember(user) { mutableStateOf(user.hasDiabetes) }
-    var hypertension by remember(user) { mutableStateOf(user.hasHypertension) }
-    var cholesterol by remember(user) { mutableStateOf(user.hasHighCholesterol) }
+    var conditions by remember { mutableStateOf(initialConditions) }
+    var newConditionInput by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color(0xFF1C1C22),
         title = {
-            Text(
-                text = "Edit Health Directives",
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold
-            )
+            Text("Edit Health Directives", color = Color.White, fontWeight = FontWeight.Bold)
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
-                    text = "Toggle which health alerts the scanner must enforce for your profile:",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "NutriWise checks these conditions on every scan:",
+                    color = Color(0xFFBDBDBD),
                     fontSize = 12.sp
                 )
+
+                // Input to add another condition
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newConditionInput,
+                        onValueChange = { newConditionInput = it },
+                        placeholder = { Text("e.g. Diabetes, Peanut Allergy, PCOS", fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = Color(0xFF2B2B32),
+                            unfocusedContainerColor = Color(0xFF2B2B32)
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(
+                        onClick = {
+                            val trimmed = newConditionInput.trim()
+                            if (trimmed.isNotBlank() && !conditions.contains(trimmed)) {
+                                conditions = conditions + trimmed
+                                newConditionInput = ""
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Add", tint = Color(0xFF81C784))
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(6.dp))
 
-                ThemeToggleRow("Diabetes / Blood Sugar", diabetes) { diabetes = it }
-                ThemeToggleRow("Hypertension (High Sodium)", hypertension) { hypertension = it }
-                ThemeToggleRow("High Cholesterol (Palm Oil)", cholesterol) { cholesterol = it }
+                // Flow of existing conditions with delete cross
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    conditions.forEach { condition ->
+                        InputChip(
+                            selected = true,
+                            onClick = { conditions = conditions - condition },
+                            label = { Text(condition, color = Color.White, fontSize = 12.sp) },
+                            trailingIcon = {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Remove",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            colors = InputChipDefaults.inputChipColors(
+                                selectedContainerColor = Color(0xFF2E7D32)
+                            )
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
-                onClick = {
-                    onSave(
-                        user.copy(
-                            hasDiabetes = diabetes,
-                            hasHypertension = hypertension,
-                            hasHighCholesterol = cholesterol
-                        )
-                    )
-                }
+                onClick = { onSave(conditions) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
             ) {
                 Text("Save Changes")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = MaterialTheme.colorScheme.outline)
+                Text("Cancel", color = Color.Gray)
             }
         }
     )
-}
-
-@Composable
-private fun ProfileMetric(count: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = count,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.outline
-        )
-    }
 }
 
 @Composable
@@ -600,31 +492,5 @@ private fun DirectiveCard(title: String, desc: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-@Composable
-private fun ThemeToggleRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary
-            )
-        )
     }
 }
